@@ -1,0 +1,347 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum VerifiedStatus {
+  unclaimed
+  claimed
+  verified
+}
+
+enum ListingSource {
+  self_registered
+  imported_claimed
+}
+
+enum PlanType {
+  basic
+  featured
+  premium
+}
+
+enum BillingCycle {
+  monthly
+  annual
+}
+
+enum MembershipStatus {
+  active
+  cancelled
+  past_due
+  trialing
+}
+
+enum LeadStatus {
+  new
+  contacted
+  quote_sent
+  job_won
+  job_lost
+  no_response
+  spam
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+enum LocationType {
+  city
+  suburb
+  neighborhood
+}
+
+enum PageType {
+  service
+  location
+  service_location
+  guide
+  project
+}
+
+enum ClaimMethod {
+  phone_sms
+  email_domain
+}
+
+enum ClaimStatus {
+  pending
+  verified
+  expired
+  rejected
+}
+
+model Contractor {
+  id                  String         @id @default(uuid())
+  name                String
+  slug                String         @unique
+  description         String?
+  phone               String?
+  email               String?
+  website             String?
+  yearsInBusiness     Int?
+  licenseNumber       String?
+  licenseExpiry       DateTime?
+  insuranceVerified   Boolean        @default(false)
+  verifiedStatus      VerifiedStatus @default(unclaimed)
+  listingSource       ListingSource  @default(self_registered)
+  googlePlaceId       String?        @unique
+  rating              Float?
+  reviewCount         Int            @default(0)
+  responseRate        Float?
+  responseTimeLabel   String?
+  profileCompleteness Int            @default(0)
+  hours               Json?
+  lat                 Float?
+  lng                 Float?
+  address             String?
+  city                String?
+  state               String?        @default("TX")
+  zip                 String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  services     ContractorService[]
+  locations    ContractorLocation[]
+  reviews      Review[]
+  leads        Lead[]
+  membership   Membership?
+  photos ContractorPhoto[]
+}
+
+model Service {
+  id          String  @id @default(uuid())
+  name        String
+  slug        String  @unique
+  description String?
+  parentId    String?
+  level       Int     @default(0)
+  isActive    Boolean @default(true)
+  isPublic    Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  parent      Service?           @relation("ServiceHierarchy", fields: [parentId], references: [id])
+  children    Service[]          @relation("ServiceHierarchy")
+  contractors ContractorService[]
+  leads       Lead[]
+  seoPages    SeoPage[]
+}
+
+model Location {
+  id       String       @id @default(uuid())
+  name     String
+  slug     String       @unique
+  type     LocationType @default(city)
+  parentId String?
+  isActive Boolean      @default(true)
+  lat      Float?
+  lng      Float?
+  seoIntro String?
+
+  parent      Location?           @relation("LocationHierarchy", fields: [parentId], references: [id])
+  children    Location[]          @relation("LocationHierarchy")
+  contractors ContractorLocation[]
+  leads       Lead[]
+  seoPages    SeoPage[]
+}
+
+model ContractorService {
+  id           String     @id @default(uuid())
+  contractorId String
+  serviceId    String
+  isPrimary    Boolean    @default(false)
+
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  service    Service    @relation(fields: [serviceId], references: [id])
+
+  @@unique([contractorId, serviceId])
+}
+
+model ContractorLocation {
+  id           String @id @default(uuid())
+  contractorId String
+  locationId   String
+
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  location   Location   @relation(fields: [locationId], references: [id])
+
+  @@unique([contractorId, locationId])
+}
+
+model ContractorPhoto {
+  id           String   @id @default(uuid())
+  contractorId String
+  url          String
+  caption      String?
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+}
+
+model Review {
+  id                   String       @id @default(uuid())
+  contractorId         String
+  reviewerName         String
+  reviewerEmail        String
+  rating               Int
+  ratingService        Int?
+  ratingResults        Int?
+  ratingExpertise      Int?
+  ratingCommunication  Int?
+  ratingResponsiveness Int?
+  reviewText           String
+  projectType          String?
+  status               ReviewStatus @default(pending)
+  createdAt            DateTime     @default(now())
+
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+}
+
+model Lead {
+  id                   String     @id @default(uuid())
+  contractorId         String
+  serviceId            String?
+  locationId           String?
+  name                 String
+  email                String
+  phone                String?
+  budgetRange          String?
+  projectDescription   String
+  preferredContactDay  String?
+  preferredContactTime String?
+  status               LeadStatus @default(new)
+  isMultiQuote         Boolean    @default(false)
+  sourcePage           String?
+  submitterIp          String?
+  followUpSentAt       DateTime?
+  createdAt            DateTime   @default(now())
+
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  service    Service?   @relation(fields: [serviceId], references: [id])
+  location   Location?  @relation(fields: [locationId], references: [id])
+}
+
+model Membership {
+  id                   String           @id @default(uuid())
+  contractorId         String           @unique
+  planType             PlanType         @default(basic)
+  billingCycle         BillingCycle?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  status               MembershipStatus @default(active)
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime         @default(now())
+
+  contractor Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+}
+
+model SeoPage {
+  id                 String   @id @default(uuid())
+  pageType           PageType
+  serviceId          String?
+  locationId         String?
+  slug               String   @unique
+  title              String
+  metaDescription    String?
+  introContent       Json?
+  introWinnerIndex   Int?
+  contentGeneratedAt DateTime?
+  isPublished        Boolean  @default(true)
+
+  service  Service?  @relation(fields: [serviceId], references: [id])
+  location Location? @relation(fields: [locationId], references: [id])
+}
+
+model ImportedListing {
+  id                String    @id @default(uuid())
+  googlePlaceId     String?   @unique
+  businessName      String
+  phone             String?
+  email             String?
+  website           String?
+  address           String?
+  city              String?
+  state             String?
+  zip               String?
+  lat               Float?
+  lng               Float?
+  categoriesRaw     String?
+  categoriesMapped  Json?
+  hours             Json?
+  description       String?
+  status            String    @default("unclaimed")
+  importBatchId     String?
+  claimedByMemberId String?
+  claimedAt         DateTime?
+  createdAt         DateTime  @default(now())
+
+  importBatch  ImportBatch?  @relation(fields: [importBatchId], references: [id])
+  claimRequest ClaimRequest?
+}
+
+model ImportBatch {
+  id              String   @id @default(uuid())
+  filename        String
+  importedByAdmin String
+  totalRows       Int      @default(0)
+  successfulRows  Int      @default(0)
+  skippedRows     Int      @default(0)
+  errorRows       Int      @default(0)
+  status          String   @default("pending")
+  createdAt       DateTime @default(now())
+
+  listings ImportedListing[]
+}
+
+model ClaimRequest {
+  id                 String      @id @default(uuid())
+  listingId          String      @unique
+  memberId           String
+  verificationMethod ClaimMethod
+  verificationCode   String?
+  sentAt             DateTime    @default(now())
+  verifiedAt         DateTime?
+  status             ClaimStatus @default(pending)
+  adminNotes         String?
+
+  listing ImportedListing @relation(fields: [listingId], references: [id])
+}
+
+model GuidePost {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  title       String
+  excerpt     String?
+  content     String
+  metaTitle   String?
+  metaDesc    String?
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ProjectPost {
+  id           String   @id @default(uuid())
+  slug         String   @unique
+  title        String
+  excerpt      String?
+  content      String
+  contractorId String?
+  city         String?
+  serviceSlug  String?
+  imageUrl     String?
+  metaTitle    String?
+  metaDesc     String?
+  isPublished  Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
