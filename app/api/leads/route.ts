@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { leadSchema } from "@/lib/validations/lead";
+import { sendNewLeadEmail } from "@/lib/email";
 import { z } from "zod";
 
 // Simple in-memory rate limiter (production should use Redis)
@@ -87,7 +88,22 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // TODO: Send email notification to contractor (Phase 3)
+    // Send lead notification email to contractor
+    if (contractor.email) {
+      const service = parsed.serviceId
+        ? await prisma.service.findUnique({ where: { id: parsed.serviceId } })
+        : null;
+      sendNewLeadEmail(contractor.email, {
+        contractorName: contractor.name,
+        leadName: parsed.name,
+        leadEmail: parsed.email,
+        leadPhone: parsed.phone,
+        serviceName: service?.name,
+        budgetRange: parsed.budgetRange,
+        projectDescription: parsed.projectDescription,
+        leadId: lead.id,
+      }).catch((err) => console.error("Failed to send lead email:", err));
+    }
 
     return NextResponse.json({ success: true, data: { id: lead.id } }, { status: 201 });
   } catch (error) {

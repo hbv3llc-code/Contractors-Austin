@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { prisma } from "@/lib/prisma";
+import {
+  sendSubscriptionConfirmedEmail,
+  sendSubscriptionCancelledEmail,
+  sendPaymentFailedEmail,
+} from "@/lib/email";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -54,12 +59,19 @@ export async function POST(request: NextRequest) {
         });
 
         // Update contractor status to claimed if unclaimed
-        await prisma.contractor.update({
+        const contractor = await prisma.contractor.update({
           where: { id: contractorId },
-          data: {
-            verifiedStatus: "claimed",
-          },
-        }).catch(() => {}); // Ignore if contractor doesn't exist yet
+          data: { verifiedStatus: "claimed" },
+        }).catch(() => null);
+
+        // Send subscription confirmed email
+        if (contractor?.email) {
+          sendSubscriptionConfirmedEmail(
+            contractor.email,
+            contractor.name,
+            plan.charAt(0).toUpperCase() + plan.slice(1)
+          ).catch((err) => console.error("Failed to send subscription confirmed email:", err));
+        }
 
         break;
       }
@@ -89,21 +101,48 @@ export async function POST(request: NextRequest) {
 
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
+        const cancelled = await prisma.membership.findFirst({
+          where: { stripeSubscriptionId: subscription.id },
+          include: { contractor: true },
+        });
         await prisma.membership.updateMany({
           where: { stripeSubscriptionId: subscription.id },
           data: { status: "cancelled", planType: "basic" },
         });
+        if (cancelled?.contractor?.email) {
+          const periodEnd = cancelled.currentPeriodEnd
+            ? cancelled.currentPeriodEnd.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+            : "the end of your billing period";
+          sendSubscriptionCancelledEmail(
+            cancelled.contractor.email,
+            cancelled.contractor.name,
+            periodEnd
+          ).catch((err) => console.error("Failed to send cancellation email:", err));
+        }
         break;
       }
 
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
         if (invoice.subscription) {
+          const failedMembership = await prisma.membership.findFirst({
+            where: { stripeSubscriptionId: invoice.subscription as string },
+            include: { contractor: true },
+          });
           await prisma.membership.updateMany({
             where: { stripeSubscriptionId: invoice.subscription as string },
             data: { status: "past_due" },
           });
-          // TODO: Send payment failed email (Phase 3)
+          if (failedMembership?.contractor?.email) {
+            const amount = invoice.amount_due
+              ? `$${(invoice.amount_due / 100).toFixed(2)}`
+              : "your subscription amount";
+            sendPaymentFailedEmail(
+              failedMembership.contractor.email,
+              failedMembership.contractor.name,
+              amount
+            ).catch((err) => console.error("Failed to send payment failed email:", err));
+          }
         }
         break;
       }
@@ -119,7 +158,7 @@ export async function POST(request: NextRequest) {
               currentPeriodEnd: new Date(sub.current_period_end * 1000),
             },
           });
-          // TODO: Send receipt email (Phase 3)
+          // Receipt is sent by Stripe directly if configured in Dashboard
         }
         break;
       }

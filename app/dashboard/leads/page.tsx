@@ -1,12 +1,13 @@
 export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { Inbox, CheckCircle, Phone, Mail, Clock, DollarSign } from "lucide-react";
+import { CheckCircle, Phone, Mail, Clock, DollarSign } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatPhone } from "@/lib/utils";
+import LeadStatusSelect from "./lead-status-select";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "My Leads" };
@@ -32,7 +33,6 @@ export default async function LeadsPage() {
       const contractor = await prisma.contractor.findFirst({
         where: { email: user.email },
       });
-
       if (contractor) {
         leads = await prisma.lead.findMany({
           where: { contractorId: contractor.id, status: { not: "spam" } },
@@ -83,28 +83,21 @@ export default async function LeadsPage() {
                         <Badge variant="secondary" className="text-xs">Multi-quote</Badge>
                       )}
                     </div>
-
                     {lead.service && (
                       <p className="text-sm text-muted-foreground mb-1">{lead.service.name}</p>
                     )}
-
                     <p className="text-sm text-gray-700 mb-3 leading-relaxed">
                       {lead.projectDescription}
                     </p>
-
                     <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
                       <div className="flex items-center gap-1.5">
                         <Mail className="h-3.5 w-3.5" />
-                        <a href={`mailto:${lead.email}`} className="hover:text-primary">
-                          {lead.email}
-                        </a>
+                        <a href={`mailto:${lead.email}`} className="hover:text-primary">{lead.email}</a>
                       </div>
                       {lead.phone && (
                         <div className="flex items-center gap-1.5">
                           <Phone className="h-3.5 w-3.5" />
-                          <a href={`tel:${lead.phone}`} className="hover:text-primary">
-                            {formatPhone(lead.phone)}
-                          </a>
+                          <a href={`tel:${lead.phone}`} className="hover:text-primary">{formatPhone(lead.phone)}</a>
                         </div>
                       )}
                       {lead.budgetRange && (
@@ -115,22 +108,15 @@ export default async function LeadsPage() {
                       )}
                       <div className="flex items-center gap-1.5">
                         <Clock className="h-3.5 w-3.5" />
-                        {new Date(lead.createdAt).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
+                        {new Date(lead.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                       </div>
                     </div>
-
                     {lead.preferredContactDay && (
                       <p className="text-xs text-muted-foreground mt-2">
-                        Prefers: {lead.preferredContactDay}
-                        {lead.preferredContactTime ? `, ${lead.preferredContactTime}` : ""}
+                        Prefers: {lead.preferredContactDay}{lead.preferredContactTime ? `, ${lead.preferredContactTime}` : ""}
                       </p>
                     )}
                   </div>
-
                   <div className="flex-shrink-0">
                     <LeadStatusSelect leadId={lead.id} currentStatus={lead.status} />
                   </div>
@@ -141,22 +127,5 @@ export default async function LeadsPage() {
         </div>
       )}
     </div>
-  );
-}
-
-function LeadStatusSelect({ leadId, currentStatus }: { leadId: string; currentStatus: string }) {
-  return (
-    <select
-      defaultValue={currentStatus}
-      className="rounded-lg border border-border bg-white px-3 py-2 text-sm text-foreground focus:ring-2 focus:ring-ring outline-none"
-    >
-      <option value="new">New</option>
-      <option value="contacted">Contacted</option>
-      <option value="quote_sent">Quote Sent</option>
-      <option value="job_won">Job Won</option>
-      <option value="job_lost">Job Lost</option>
-      <option value="no_response">No Response</option>
-      <option value="spam">Spam</option>
-    </select>
   );
 }
