@@ -55,7 +55,7 @@ export default function Header() {
                   ))}
                   <div className="my-1 border-t border-border" />
                   <Link
-                    href="/"
+                    href="/services"
                     className="block rounded-lg px-3 py-2 text-sm font-medium text-primary hover:bg-blue-50 transition-colors"
                   >
                     Browse All Categories →
@@ -63,6 +63,12 @@ export default function Header() {
                 </div>
               </div>
             </div>
+            <Link
+              href="/guides"
+              className="text-sm font-medium text-gray-600 hover:text-primary transition-colors"
+            >
+              Guides
+            </Link>
             <Link
               href="/get-quotes"
               className="text-sm font-medium text-gray-600 hover:text-primary transition-colors"
@@ -112,6 +118,13 @@ export default function Header() {
               onClick={() => setMobileOpen(false)}
             >
               Find Pros
+            </Link>
+            <Link
+              href="/guides"
+              className="block rounded-lg px-3 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              onClick={() => setMobileOpen(false)}
+            >
+              Guides
             </Link>
             <Link
               href="/get-quotes"

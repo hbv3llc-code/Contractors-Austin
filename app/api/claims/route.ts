@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
         console.error("Failed to send claim verify email:", err)
       );
     } else {
-      // SMS via Twilio — graceful fallback if not configured
+      // SMS via Twilio
       try {
         const twilio = (await import("twilio")).default;
         const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -72,6 +72,10 @@ export async function POST(request: NextRequest) {
         });
       } catch (err) {
         console.error("Failed to send SMS:", err);
+        return NextResponse.json(
+          { error: "Failed to send SMS verification code. Please try email verification instead." },
+          { status: 500 }
+        );
       }
     }
 

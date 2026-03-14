@@ -26,7 +26,7 @@ export default function Footer() {
   return (
     <footer className="bg-gray-900 text-gray-300">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-16">
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-5">
           {/* Brand */}
           <div>
             <Link href="/" className="flex items-center gap-2 mb-4">
@@ -79,6 +79,35 @@ export default function Footer() {
                   </Link>
                 </li>
               ))}
+            </ul>
+          </div>
+
+          {/* Resources */}
+          <div>
+            <h3 className="mb-4 text-sm font-semibold text-white uppercase tracking-wider">
+              Resources
+            </h3>
+            <ul className="space-y-2">
+              <li>
+                <Link href="/guides" className="text-sm text-gray-400 hover:text-white transition-colors">
+                  Guides & Tips
+                </Link>
+              </li>
+              <li>
+                <Link href="/projects" className="text-sm text-gray-400 hover:text-white transition-colors">
+                  Project Gallery
+                </Link>
+              </li>
+              <li>
+                <Link href="/locations" className="text-sm text-gray-400 hover:text-white transition-colors">
+                  Service Areas
+                </Link>
+              </li>
+              <li>
+                <Link href="/services" className="text-sm text-gray-400 hover:text-white transition-colors">
+                  All Services
+                </Link>
+              </li>
             </ul>
           </div>
 

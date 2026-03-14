@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ListingSetupForm } from "@/components/forms/listing-setup-form";
 import { PhotoUpload } from "@/components/dashboard/photo-upload";
 import { DocumentUpload } from "@/components/dashboard/document-upload";
+import { HoursEditor } from "@/components/dashboard/hours-editor";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "My Listing" };
@@ -22,6 +23,7 @@ export default async function ListingPage() {
           services: { include: { service: true } },
           membership: true,
           photos: { orderBy: { sortOrder: "asc" } },
+          // hours is a plain JSON field — no include needed
         },
       });
     }
@@ -48,6 +50,12 @@ export default async function ListingPage() {
           licenseFileUrl={contractor.licenseFileUrl ?? null}
           insuranceFileUrl={contractor.insuranceFileUrl ?? null}
           insuranceVerified={contractor.insuranceVerified}
+        />
+      )}
+      {contractor && (
+        <HoursEditor
+          contractorId={contractor.id}
+          initialHours={contractor.hours}
         />
       )}
     </div>

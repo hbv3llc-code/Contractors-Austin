@@ -3,16 +3,32 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import {
   Users, Upload, Shield, BarChart3, Home, LogOut,
+  Star, ChevronRight,
 } from "lucide-react";
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim());
 
-const navItems = [
-  { href: "/admin", label: "Dashboard", icon: BarChart3 },
-  { href: "/admin/members", label: "Members", icon: Users },
-  { href: "/admin/imports", label: "Imports", icon: Upload },
-  { href: "/admin/claims", label: "Claims", icon: Shield },
-  { href: "/admin/reviews", label: "Reviews", icon: Shield },
+const navSections = [
+  {
+    label: "Overview",
+    items: [
+      { href: "/admin", label: "Dashboard", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Directory",
+    items: [
+      { href: "/admin/members", label: "Members", icon: Users },
+      { href: "/admin/imports", label: "Imports", icon: Upload },
+    ],
+  },
+  {
+    label: "Moderation",
+    items: [
+      { href: "/admin/claims", label: "Claims", icon: Shield },
+      { href: "/admin/reviews", label: "Reviews", icon: Star },
+    ],
+  },
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -36,16 +52,26 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           </Link>
         </div>
 
-        <nav className="flex-1 p-3 space-y-0.5">
-          {navItems.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-            >
-              <Icon className="h-4 w-4" />
-              {label}
-            </Link>
+        <nav className="flex-1 p-3 space-y-4">
+          {navSections.map((section) => (
+            <div key={section.label}>
+              <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
+                {section.label}
+              </p>
+              <div className="space-y-0.5">
+                {section.items.map(({ href, label, icon: Icon }) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                  >
+                    <Icon className="h-4 w-4 flex-shrink-0" />
+                    {label}
+                    <ChevronRight className="h-3 w-3 ml-auto text-gray-600" />
+                  </Link>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
 
