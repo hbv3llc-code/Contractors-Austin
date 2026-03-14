@@ -7,33 +7,48 @@ interface ContractorSummary {
   id: string;
   verifiedStatus: string;
   planType: string;
+  insuranceVerified: boolean;
 }
 
 export default function AdminMemberActions({ contractor }: { contractor: ContractorSummary }) {
   const [status, setStatus] = useState(contractor.verifiedStatus);
+  const [insuranceVerified, setInsuranceVerified] = useState(contractor.insuranceVerified);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function updateStatus(newStatus: string) {
+  async function updateContractor(data: Record<string, unknown>) {
     setSaving(true);
     setMessage(null);
     try {
       const res = await fetch(`/api/admin/contractors/${contractor.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verifiedStatus: newStatus }),
+        body: JSON.stringify(data),
       });
       if (res.ok) {
-        setStatus(newStatus);
-        setMessage("Status updated successfully");
+        setMessage("Updated successfully");
+        return true;
       } else {
-        setMessage("Failed to update status");
+        setMessage("Failed to update");
+        return false;
       }
     } catch {
       setMessage("Network error");
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  async function updateStatus(newStatus: string) {
+    const ok = await updateContractor({ verifiedStatus: newStatus });
+    if (ok) setStatus(newStatus);
+  }
+
+  async function toggleInsurance() {
+    const newVal = !insuranceVerified;
+    const ok = await updateContractor({ insuranceVerified: newVal });
+    if (ok) setInsuranceVerified(newVal);
   }
 
   return (
@@ -41,7 +56,7 @@ export default function AdminMemberActions({ contractor }: { contractor: Contrac
       <h2 className="font-bold text-foreground">Admin Actions</h2>
 
       {message && (
-        <p className={`text-xs rounded p-2 ${message.includes("success") ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+        <p className={`text-xs rounded p-2 ${message.includes("success") || message === "Updated successfully" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
           {message}
         </p>
       )}
@@ -64,6 +79,21 @@ export default function AdminMemberActions({ contractor }: { contractor: Contrac
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="pt-3 border-t border-border">
+        <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Insurance</p>
+        <button
+          onClick={toggleInsurance}
+          disabled={saving}
+          className={`w-full rounded-lg px-3 py-2 text-sm text-left transition-colors border ${
+            insuranceVerified
+              ? "bg-green-50 border-green-200 text-green-700 font-semibold"
+              : "border-border hover:bg-gray-50 text-foreground"
+          } disabled:opacity-60`}
+        >
+          {insuranceVerified ? "✓ Insurance Verified" : "Mark Insurance Verified"}
+        </button>
       </div>
 
       <div className="pt-2 border-t border-border">

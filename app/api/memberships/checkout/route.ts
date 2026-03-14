@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     }
 
     const contractor = await prisma.contractor.findFirst({
-      where: { email: user.email! },
+      where: { OR: [{ userId: user.id }, { email: user.email! }] },
       include: { membership: true },
     });
 

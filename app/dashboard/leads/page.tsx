@@ -29,9 +29,9 @@ export default async function LeadsPage() {
   let leads: Awaited<ReturnType<typeof prisma.lead.findMany<{ include: { service: true } }>>> = [];
 
   try {
-    if (user?.email) {
+    if (user) {
       const contractor = await prisma.contractor.findFirst({
-        where: { email: user.email },
+        where: { OR: [{ userId: user.id }, { email: user.email! }] },
       });
       if (contractor) {
         leads = await prisma.lead.findMany({

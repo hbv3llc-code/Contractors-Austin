@@ -17,9 +17,12 @@ export async function PUT(
     const body = await request.json();
     const { name, phone, website, address, city, zip, yearsInBusiness, licenseNumber, description } = body;
 
-    // Verify ownership
+    // Verify ownership (prefer userId, fall back to email for legacy records)
     const existing = await prisma.contractor.findFirst({
-      where: { id: params.id, email: user.email! },
+      where: {
+        id: params.id,
+        OR: [{ userId: user.id }, { email: user.email! }],
+      },
     });
 
     if (!existing) {

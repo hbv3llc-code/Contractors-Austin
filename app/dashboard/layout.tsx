@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard, User, Inbox, CreditCard, Settings, LogOut, Eye } from "lucide-react";
+import { LayoutDashboard, User, Inbox, CreditCard, Settings, LogOut, BarChart2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "My Listing", href: "/dashboard/listing", icon: User },
   { label: "Leads", href: "/dashboard/leads", icon: Inbox },
+  { label: "Analytics", href: "/dashboard/analytics", icon: BarChart2 },
   { label: "Billing", href: "/dashboard/billing", icon: CreditCard },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];

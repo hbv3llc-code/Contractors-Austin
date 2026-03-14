@@ -81,6 +81,7 @@ enum ClaimStatus {
 
 model Contractor {
   id                  String         @id @default(uuid())
+  userId              String?        @unique
   name                String
   slug                String         @unique
   description         String?
@@ -90,7 +91,9 @@ model Contractor {
   yearsInBusiness     Int?
   licenseNumber       String?
   licenseExpiry       DateTime?
+  licenseFileUrl      String?
   insuranceVerified   Boolean        @default(false)
+  insuranceFileUrl    String?
   verifiedStatus      VerifiedStatus @default(unclaimed)
   listingSource       ListingSource  @default(self_registered)
   googlePlaceId       String?        @unique

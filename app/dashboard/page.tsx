@@ -12,17 +12,10 @@ export const metadata: Metadata = {
   title: "My Dashboard",
 };
 
-async function getContractorData(userId: string) {
+async function getContractorData(userId: string, userEmail: string) {
   try {
-    // In production, you'd link auth users to contractors via a users table
-    // For now, use the email as the lookup key
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user?.email) return null;
-
     const contractor = await prisma.contractor.findFirst({
-      where: { email: user.email },
+      where: { OR: [{ userId }, { email: userEmail }] },
       include: {
         membership: true,
         leads: { where: { status: "new" }, take: 5, orderBy: { createdAt: "desc" } },
@@ -39,7 +32,7 @@ async function getContractorData(userId: string) {
 export default async function DashboardPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  const contractor = await getContractorData(user?.id ?? "");
+  const contractor = await getContractorData(user?.id ?? "", user?.email ?? "");
 
   const plan = contractor?.membership?.planType ?? "basic";
   const newLeads = contractor?.leads?.length ?? 0;

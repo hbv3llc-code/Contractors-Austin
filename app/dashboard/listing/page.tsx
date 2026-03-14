@@ -3,6 +3,8 @@ export const dynamic = "force-dynamic";
 import { createClient } from "@/lib/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { ListingSetupForm } from "@/components/forms/listing-setup-form";
+import { PhotoUpload } from "@/components/dashboard/photo-upload";
+import { DocumentUpload } from "@/components/dashboard/document-upload";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "My Listing" };
@@ -13,9 +15,9 @@ export default async function ListingPage() {
 
   let contractor = null;
   try {
-    if (user?.email) {
+    if (user) {
       contractor = await prisma.contractor.findFirst({
-        where: { email: user.email },
+        where: { OR: [{ userId: user.id }, { email: user.email! }] },
         include: {
           services: { include: { service: true } },
           membership: true,
@@ -34,6 +36,20 @@ export default async function ListingPage() {
         </p>
       </div>
       <ListingSetupForm contractor={contractor} userEmail={user?.email ?? ""} />
+      {contractor && (
+        <PhotoUpload
+          contractorId={contractor.id}
+          initialPhotos={contractor.photos}
+          planType={contractor.membership?.planType ?? "basic"}
+        />
+      )}
+      {contractor && (
+        <DocumentUpload
+          licenseFileUrl={contractor.licenseFileUrl ?? null}
+          insuranceFileUrl={contractor.insuranceFileUrl ?? null}
+          insuranceVerified={contractor.insuranceVerified}
+        />
+      )}
     </div>
   );
 }

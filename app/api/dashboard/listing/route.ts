@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
 
     const contractor = await prisma.contractor.create({
       data: {
+        userId: user.id,
         name,
         slug,
         phone: phone?.replace(/\D/g, ""),

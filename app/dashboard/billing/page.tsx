@@ -16,9 +16,9 @@ export default async function BillingPage() {
 
   let membership = null;
   try {
-    if (user?.email) {
+    if (user) {
       const contractor = await prisma.contractor.findFirst({
-        where: { email: user.email },
+        where: { OR: [{ userId: user.id }, { email: user.email! }] },
         include: { membership: true },
       });
       membership = contractor?.membership;

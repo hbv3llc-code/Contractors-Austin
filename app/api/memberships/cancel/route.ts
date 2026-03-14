@@ -19,19 +19,19 @@ export async function POST(request: NextRequest) {
       include: { membership: true },
     });
 
-    if (!contractor?.membership?.stripeCustomerId) {
-      return NextResponse.json({ error: "No billing account found" }, { status: 404 });
+    if (!contractor?.membership?.stripeSubscriptionId) {
+      return NextResponse.json({ error: "No active subscription found" }, { status: 404 });
     }
 
-    const returnUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard/billing`;
-    const session = await stripe.billingPortal.sessions.create({
-      customer: contractor.membership.stripeCustomerId,
-      return_url: returnUrl,
+    // Cancel at period end — contractor keeps access until billing period ends
+    await stripe.subscriptions.update(contractor.membership.stripeSubscriptionId, {
+      cancel_at_period_end: true,
     });
 
-    return NextResponse.json({ url: session.url });
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+    return NextResponse.redirect(`${siteUrl}/dashboard/billing?cancelled=true`);
   } catch (error) {
-    console.error("POST /api/memberships/portal error:", error);
-    return NextResponse.json({ error: "Failed to create portal session" }, { status: 500 });
+    console.error("POST /api/memberships/cancel error:", error);
+    return NextResponse.json({ error: "Cancellation failed" }, { status: 500 });
   }
 }

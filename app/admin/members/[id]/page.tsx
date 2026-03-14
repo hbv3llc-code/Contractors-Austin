@@ -21,6 +21,7 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
     },
   }).catch(() => null);
 
+
   if (!contractor) notFound();
 
   return (
@@ -61,12 +62,32 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
             <div><span className="text-muted-foreground">Email:</span> {contractor.email ?? "—"}</div>
             <div><span className="text-muted-foreground">Phone:</span> {contractor.phone ?? "—"}</div>
             <div><span className="text-muted-foreground">Website:</span> {contractor.website ? <a href={contractor.website} className="text-primary hover:underline truncate block max-w-[180px]">{contractor.website}</a> : "—"}</div>
-            <div><span className="text-muted-foreground">License:</span> {contractor.licenseNumber ?? "—"}</div>
+            <div><span className="text-muted-foreground">License #:</span> {contractor.licenseNumber ?? "—"}</div>
             <div><span className="text-muted-foreground">Leads:</span> {contractor._count.leads}</div>
             <div><span className="text-muted-foreground">Reviews:</span> {contractor._count.reviews}</div>
             <div><span className="text-muted-foreground">Rating:</span> {contractor.rating?.toFixed(1) ?? "—"}</div>
             <div><span className="text-muted-foreground">Joined:</span> {new Date(contractor.createdAt).toLocaleDateString()}</div>
           </div>
+
+          {(contractor.licenseFileUrl || contractor.insuranceFileUrl) && (
+            <div className="pt-3 border-t border-border">
+              <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Uploaded Documents</p>
+              <div className="flex flex-wrap gap-3">
+                {contractor.licenseFileUrl && (
+                  <a href={contractor.licenseFileUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-sm text-primary hover:underline">
+                    📄 License File ↗
+                  </a>
+                )}
+                {contractor.insuranceFileUrl && (
+                  <a href={contractor.insuranceFileUrl} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 text-sm text-primary hover:underline">
+                    🛡️ Insurance File ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
 
           {contractor.services.length > 0 && (
             <div>
@@ -87,6 +108,7 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
           id: contractor.id,
           verifiedStatus: contractor.verifiedStatus,
           planType: contractor.membership?.planType ?? "basic",
+          insuranceVerified: contractor.insuranceVerified,
         }} />
       </div>
 

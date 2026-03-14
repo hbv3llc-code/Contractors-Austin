@@ -14,6 +14,7 @@ async function isAdmin(request: NextRequest) {
 const patchSchema = z.object({
   verifiedStatus: z.enum(["unclaimed", "claimed", "verified"]).optional(),
   planType: z.enum(["basic", "featured", "premium"]).optional(),
+  insuranceVerified: z.boolean().optional(),
 });
 
 export async function PATCH(
@@ -28,9 +29,13 @@ export async function PATCH(
     const body = await request.json();
     const updates = patchSchema.parse(body);
 
+    const contractorData: Record<string, unknown> = {};
+    if (updates.verifiedStatus) contractorData.verifiedStatus = updates.verifiedStatus;
+    if (updates.insuranceVerified !== undefined) contractorData.insuranceVerified = updates.insuranceVerified;
+
     const contractor = await prisma.contractor.update({
       where: { id: params.id },
-      data: updates.verifiedStatus ? { verifiedStatus: updates.verifiedStatus } : {},
+      data: contractorData,
     });
 
     if (updates.planType) {
