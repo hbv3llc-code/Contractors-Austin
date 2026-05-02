@@ -17,17 +17,11 @@ export default async function OnboardingPage() {
   if (!user) redirect("/login");
 
   let contractor = null;
-  let services: { id: string; name: string }[] = [];
 
   try {
     contractor = await prisma.contractor.findFirst({
       where: { OR: [{ userId: user.id }, { email: user.email! }] },
       include: { services: { include: { service: true } } },
-    });
-    services = await prisma.service.findMany({
-      where: { isPublic: true, isActive: true, level: 0 },
-      orderBy: { sortOrder: "asc" },
-      select: { id: true, name: true },
     });
   } catch {}
 
@@ -50,7 +44,6 @@ export default async function OnboardingPage() {
           <OnboardingForm
             contractor={contractor}
             userEmail={user.email ?? ""}
-            services={services}
           />
         </div>
       </div>

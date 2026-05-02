@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -38,9 +38,21 @@ interface Props {
   services: { id: string; name: string }[];
 }
 
-export default function OnboardingForm({ contractor, userEmail, services }: Props) {
+export default function OnboardingForm({ contractor, userEmail }: Omit<Props, "services">) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
+  const [services, setServices] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/services")
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success && Array.isArray(json.data)) {
+          setServices(json.data);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const primaryService = contractor?.services.find((s) => s.isPrimary)?.service;
 
