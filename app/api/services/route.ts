@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createClient } from "@supabase/supabase-js";
 
 export async function GET() {
   try {
-    const services = await prisma.service.findMany({
-      where: { isPublic: true, isActive: true },
-      orderBy: { sortOrder: "asc" },
-    });
-    return NextResponse.json({ success: true, data: services });
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    const { data, error } = await supabase
+      .from("Service")
+      .select("id, name, sortOrder")
+      .eq("isPublic", true)
+      .eq("isActive", true)
+      .order("sortOrder", { ascending: true });
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, data: data ?? [] });
   } catch (error) {
     console.error("GET /api/services error:", error);
     return NextResponse.json(
