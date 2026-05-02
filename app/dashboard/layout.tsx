@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { LayoutDashboard, User, Inbox, CreditCard, Settings, LogOut, BarChart2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { VerifiedToast } from "@/components/dashboard/verified-toast";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,10 +39,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   let contractor = null;
   try {
-    const admin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const admin = createAdminClient();
     const { data } = await admin
       .from("Contractor")
       .select("ownerName, name, address, city, phone, email, ContractorService(id)")

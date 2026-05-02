@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { ArrowRight, Inbox, Star, Settings, TrendingUp, AlertCircle, CheckCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Metadata } from "next";
@@ -14,10 +14,7 @@ export const metadata: Metadata = {
 
 async function getContractorData(userId: string, userEmail: string) {
   try {
-    const admin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const admin = createAdminClient();
     const { data: contractor } = await admin
       .from("Contractor")
       .select("id, name, slug, rating, reviewCount, responseRate, profileCompleteness, Membership(*)")

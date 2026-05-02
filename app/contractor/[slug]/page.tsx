@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StarRating } from "@/components/ui/star-rating";
 import { QuoteForm } from "@/components/forms/quote-form";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPhone } from "@/lib/utils";
 
 interface ContractorProfilePageProps {
@@ -22,20 +22,22 @@ interface ContractorProfilePageProps {
 
 async function getContractor(slug: string) {
   try {
-    return await prisma.contractor.findUnique({
-      where: { slug },
-      include: {
-        services: { include: { service: true } },
-        locations: { include: { location: true } },
-        reviews: {
-          where: { status: "approved" },
-          orderBy: { createdAt: "desc" },
-          take: 10,
-        },
-        membership: true,
-        photos: { orderBy: { sortOrder: "asc" } },
-      },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Contractor")
+      .select("*, ContractorService(id, isPrimary, Service(id, name, slug)), ContractorLocation(id, Location(id, name, slug)), Review(id, reviewerName, rating, ratingService, ratingResults, ratingExpertise, ratingCommunication, ratingResponsiveness, reviewText, projectType, status, createdAt), Membership(planType, status), ContractorPhoto(id, url, caption, sortOrder)")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (!data) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return {
+      ...data,
+      services: (data.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+      locations: (data.ContractorLocation ?? []).map((cl: any) => ({ ...cl, location: cl.Location })),
+      reviews: (data.Review ?? []).filter((r: any) => r.status === "approved").sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 10),
+      membership: Array.isArray(data.Membership) ? data.Membership[0] : data.Membership,
+      photos: [...(data.ContractorPhoto ?? [])].sort((a: any, b: any) => a.sortOrder - b.sortOrder),
+    };
   } catch {
     return null;
   }
@@ -58,11 +60,12 @@ export async function generateMetadata({ params }: ContractorProfilePageProps): 
 
 export async function generateStaticParams() {
   try {
-    const contractors = await prisma.contractor.findMany({
-      select: { slug: true },
-      where: { verifiedStatus: { not: "unclaimed" } },
-    });
-    return contractors.map((c) => ({ slug: c.slug }));
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Contractor")
+      .select("slug")
+      .neq("verifiedStatus", "unclaimed");
+    return (data ?? []).map((c: { slug: string }) => ({ slug: c.slug }));
   } catch {
     return [];
   }

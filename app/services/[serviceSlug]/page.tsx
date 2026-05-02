@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ContractorCard } from "@/components/contractor/contractor-card";
 
 export const revalidate = 3600;
@@ -11,50 +11,48 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const service = await prisma.service.findUnique({ where: { slug: params.serviceSlug } });
-  if (!service) return {};
-
-  const seoPage = await prisma.seoPage.findFirst({
-    where: { pageType: "service", serviceId: service.id },
-  });
-
-  return {
-    title: seoPage?.title ?? `${service.name} in Austin, TX`,
-    description: seoPage?.metaDescription ?? `Find trusted ${service.name.toLowerCase()} contractors in Austin, TX. Compare ratings, read reviews, and get free quotes.`,
-  };
+  try {
+    const admin = createAdminClient();
+    const { data: service } = await admin.from("Service").select("id, name").eq("slug", params.serviceSlug).maybeSingle();
+    if (!service) return {};
+    const { data: seoPage } = await admin.from("SeoPage").select("title, metaDescription").eq("pageType", "service").eq("serviceId", service.id).maybeSingle();
+    return {
+      title: seoPage?.title ?? `${service.name} in Austin, TX`,
+      description: seoPage?.metaDescription ?? `Find trusted ${service.name.toLowerCase()} contractors in Austin, TX. Compare ratings, read reviews, and get free quotes.`,
+    };
+  } catch { return {}; }
 }
 
 export default async function ServicePage({ params }: Props) {
-  const service = await prisma.service.findUnique({
-    where: { slug: params.serviceSlug },
-    include: { children: { where: { isActive: true } } },
-  });
+  const admin = createAdminClient();
+
+  const { data: service } = await admin
+    .from("Service")
+    .select("id, name, slug, isPublic, description")
+    .eq("slug", params.serviceSlug)
+    .maybeSingle()
+    .catch(() => ({ data: null }));
 
   if (!service || !service.isPublic) notFound();
 
-  const [seoPage, contractorServices] = await Promise.all([
-    prisma.seoPage.findFirst({
-      where: { pageType: "service", serviceId: service.id },
-    }),
-    prisma.contractorService.findMany({
-      where: { serviceId: service.id },
-      include: {
-        contractor: {
-          include: {
-            membership: true,
-            services: { include: { service: true } },
-          },
-        },
-      },
-      orderBy: [
-        { contractor: { membership: { planType: "desc" } } },
-        { contractor: { rating: "desc" } },
-      ],
-      take: 30,
-    }),
+  const [{ data: childrenData }, { data: seoPage }, { data: csData }] = await Promise.all([
+    admin.from("Service").select("id, name, slug").eq("parentId", service.id).eq("isActive", true),
+    admin.from("SeoPage").select("title, metaDescription, introContent").eq("pageType", "service").eq("serviceId", service.id).maybeSingle(),
+    admin.from("ContractorService").select("Contractor(*, ContractorService(id, isPrimary, Service(id, name, slug)), Membership(planType, status))").eq("serviceId", service.id).limit(30),
   ]);
 
-  const contractors = contractorServices.map((cs) => cs.contractor);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contractors = (csData ?? []).map((cs: any) => {
+    const c = Array.isArray(cs.Contractor) ? cs.Contractor[0] : cs.Contractor;
+    if (!c) return null;
+    return {
+      ...c,
+      services: (c.ContractorService ?? []).map((s: any) => ({ ...s, service: s.Service })),
+      membership: Array.isArray(c.Membership) ? c.Membership[0] : c.Membership,
+    };
+  }).filter(Boolean);
+
+  const serviceWithChildren = { ...service, children: childrenData ?? [] };
   const introContent = seoPage?.introContent as { body?: string } | null;
 
   return (
@@ -82,11 +80,11 @@ export default async function ServicePage({ params }: Props) {
       </div>
 
       {/* Sub-services */}
-      {service.children.length > 0 && (
+      {serviceWithChildren.children.length > 0 && (
         <div className="mb-8">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase mb-3">Related Services</h2>
           <div className="flex flex-wrap gap-2">
-            {service.children.map((child) => (
+            {serviceWithChildren.children.map((child) => (
               <Link
                 key={child.id}
                 href={`/services/${child.slug}`}

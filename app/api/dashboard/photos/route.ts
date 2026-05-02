@@ -1,59 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { prisma } from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const admin = createAdminClient();
 
-    const contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId: user.id }, { email: user.email! }] },
-      include: { membership: true, photos: true },
-    });
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id, Membership(planType), ContractorPhoto(id)")
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
 
-    if (!contractor) {
-      return NextResponse.json({ error: "Contractor not found" }, { status: 404 });
-    }
+    if (!contractor) return NextResponse.json({ error: "Contractor not found" }, { status: 404 });
 
-    // Limit photos based on plan
-    const maxPhotos = contractor.membership?.planType === "premium" ? 20
-      : contractor.membership?.planType === "featured" ? 10
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const membership = Array.isArray((contractor as any).Membership) ? (contractor as any).Membership[0] : (contractor as any).Membership;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const photoCount = ((contractor as any).ContractorPhoto ?? []).length;
+
+    const maxPhotos = membership?.planType === "premium" ? 20
+      : membership?.planType === "featured" ? 10
       : 3;
 
-    if (contractor.photos.length >= maxPhotos) {
-      return NextResponse.json(
-        { error: `Your plan allows up to ${maxPhotos} photos` },
-        { status: 400 }
-      );
+    if (photoCount >= maxPhotos) {
+      return NextResponse.json({ error: `Your plan allows up to ${maxPhotos} photos` }, { status: 400 });
     }
 
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const caption = (formData.get("caption") as string) ?? "";
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
-    }
-
-    if (!file.type.startsWith("image/")) {
-      return NextResponse.json({ error: "File must be an image" }, { status: 400 });
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      return NextResponse.json({ error: "Image must be under 5MB" }, { status: 400 });
-    }
+    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    if (!file.type.startsWith("image/")) return NextResponse.json({ error: "File must be an image" }, { status: 400 });
+    if (file.size > 5 * 1024 * 1024) return NextResponse.json({ error: "Image must be under 5MB" }, { status: 400 });
 
     const ext = file.name.split(".").pop() ?? "jpg";
     const filename = `${contractor.id}/${Date.now()}.${ext}`;
 
-    const adminSupabase = createAdminClient();
-    const { error: uploadError } = await adminSupabase.storage
+    const { error: uploadError } = await admin.storage
       .from("contractor-photos")
       .upload(filename, file, { contentType: file.type, upsert: false });
 
@@ -62,18 +51,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Upload failed" }, { status: 500 });
     }
 
-    const { data: { publicUrl } } = adminSupabase.storage
-      .from("contractor-photos")
-      .getPublicUrl(filename);
+    const { data: { publicUrl } } = admin.storage.from("contractor-photos").getPublicUrl(filename);
 
-    const photo = await prisma.contractorPhoto.create({
-      data: {
-        contractorId: contractor.id,
-        url: publicUrl,
-        caption: caption || null,
-        sortOrder: contractor.photos.length,
-      },
-    });
+    const { data: photo, error: insertError } = await admin
+      .from("ContractorPhoto")
+      .insert({ contractorId: contractor.id, url: publicUrl, caption: caption || null, sortOrder: photoCount })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
 
     return NextResponse.json({ success: true, data: photo }, { status: 201 });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { generateSlug } from "@/lib/utils";
 
@@ -15,12 +15,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "All fields are required" }, { status: 400 });
     }
 
-    const admin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const admin = createAdminClient();
 
-    // Check for existing contractor
     const { data: existing } = await admin
       .from("Contractor")
       .select("id")
@@ -32,66 +28,32 @@ export async function POST(request: NextRequest) {
     if (existing) {
       const { data: contractor, error } = await admin
         .from("Contractor")
-        .update({
-          ownerName,
-          name,
-          address,
-          city,
-          state: "TX",
-          zip: zip ?? null,
-          phone: cleanPhone,
-          email,
-          userId: user.id,
-        })
+        .update({ ownerName, name, address, city, state: "TX", zip: zip ?? null, phone: cleanPhone, email, userId: user.id })
         .eq("id", existing.id)
         .select()
         .single();
 
       if (error) throw error;
 
-      // Upsert primary service
       await admin
         .from("ContractorService")
-        .upsert(
-          { contractorId: existing.id, serviceId, isPrimary: true },
-          { onConflict: "contractorId,serviceId" }
-        );
+        .upsert({ contractorId: existing.id, serviceId, isPrimary: true }, { onConflict: "contractorId,serviceId" });
 
       return NextResponse.json({ success: true, data: contractor });
     }
 
-    // Generate unique slug
     let slug = generateSlug(name);
-    const { data: slugCheck } = await admin
-      .from("Contractor")
-      .select("id")
-      .eq("slug", slug)
-      .maybeSingle();
+    const { data: slugCheck } = await admin.from("Contractor").select("id").eq("slug", slug).maybeSingle();
     if (slugCheck) slug = generateSlug(name, Math.random().toString(36).slice(2, 6));
 
-    // Create new contractor
     const { data: contractor, error: createError } = await admin
       .from("Contractor")
-      .insert({
-        userId: user.id,
-        ownerName,
-        name,
-        slug,
-        address,
-        city,
-        state: "TX",
-        zip: zip ?? null,
-        phone: cleanPhone,
-        email,
-        verifiedStatus: "claimed",
-        listingSource: "self_registered",
-      })
+      .insert({ userId: user.id, ownerName, name, slug, address, city, state: "TX", zip: zip ?? null, phone: cleanPhone, email, verifiedStatus: "claimed", listingSource: "self_registered" })
       .select()
       .single();
 
     if (createError) throw createError;
 
-    // Create service and membership
     await Promise.all([
       admin.from("ContractorService").insert({ contractorId: contractor.id, serviceId, isPrimary: true }),
       admin.from("Membership").insert({ contractorId: contractor.id, planType: "basic", status: "active" }),

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function PUT(
@@ -9,21 +9,19 @@ export async function PUT(
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ success: false, error: { code: "UNAUTHORIZED" } }, { status: 401 });
-    }
+    if (!user) return NextResponse.json({ success: false, error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
     const body = await request.json();
     const { name, phone, website, address, city, zip, yearsInBusiness, licenseNumber, description } = body;
 
-    // Verify ownership (prefer userId, fall back to email for legacy records)
-    const existing = await prisma.contractor.findFirst({
-      where: {
-        id: params.id,
-        OR: [{ userId: user.id }, { email: user.email! }],
-      },
-    });
+    const admin = createAdminClient();
+
+    const { data: existing } = await admin
+      .from("Contractor")
+      .select("id")
+      .eq("id", params.id)
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
 
     if (!existing) {
       return NextResponse.json(
@@ -32,27 +30,30 @@ export async function PUT(
       );
     }
 
-    // Calculate completeness
     const fields = [name, phone, website, address, city, zip, description];
     const filled = fields.filter(Boolean).length;
     const profileCompleteness = Math.round((filled / fields.length) * 100);
 
-    const contractor = await prisma.contractor.update({
-      where: { id: params.id },
-      data: {
+    const { data: contractor, error } = await admin
+      .from("Contractor")
+      .update({
         name,
-        phone: phone?.replace(/\D/g, ""),
+        phone: phone?.replace(/\D/g, "") ?? null,
         website: website ? (website.startsWith("http") ? website : `https://${website}`) : null,
-        address,
+        address: address ?? null,
         city,
         state: "TX",
-        zip,
-        yearsInBusiness: yearsInBusiness ?? undefined,
-        licenseNumber,
-        description,
+        zip: zip ?? null,
+        yearsInBusiness: yearsInBusiness ?? null,
+        licenseNumber: licenseNumber ?? null,
+        description: description ?? null,
         profileCompleteness,
-      },
-    });
+      })
+      .eq("id", params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
 
     return NextResponse.json({ success: true, data: contractor });
   } catch (error) {

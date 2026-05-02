@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 import ClaimWizard from "./claim-wizard";
@@ -10,28 +10,27 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const listing = await prisma.importedListing.findUnique({ where: { id: params.id } });
-  if (!listing) return { title: "Claim Not Found" };
-  return {
-    title: `Claim ${listing.businessName} | ContractorsAustin`,
-    robots: { index: false },
-  };
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin.from("ImportedListing").select("businessName").eq("id", params.id).maybeSingle();
+    if (!data) return { title: "Claim Not Found" };
+    return { title: `Claim ${data.businessName} | ContractorsAustin`, robots: { index: false } };
+  } catch {
+    return { title: "Claim Not Found" };
+  }
 }
 
 export default async function ClaimPage({ params }: Props) {
-  const listing = await prisma.importedListing.findUnique({
-    where: { id: params.id },
-    select: {
-      id: true,
-      businessName: true,
-      address: true,
-      city: true,
-      phone: true,
-      email: true,
-      website: true,
-      status: true,
-    },
-  });
+  let listing = null;
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("ImportedListing")
+      .select("id, businessName, address, city, phone, email, website, status")
+      .eq("id", params.id)
+      .maybeSingle();
+    listing = data;
+  } catch {}
 
   if (!listing) notFound();
 

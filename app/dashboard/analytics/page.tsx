@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { TrendingUp, Inbox, CheckCircle, XCircle, Clock, Star, Lock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Button } from "@/components/ui/button";
 import type { Metadata } from "next";
 
@@ -13,17 +13,22 @@ export default async function AnalyticsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  let contractor = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let contractor: any = null;
   try {
     if (user) {
-      contractor = await prisma.contractor.findFirst({
-        where: { OR: [{ userId: user.id }, { email: user.email! }] },
-        include: {
-          membership: true,
-          leads: { orderBy: { createdAt: "desc" } },
-          reviews: { where: { status: "approved" } },
-        },
-      });
+      const admin = createAdminClient();
+      const { data } = await admin
+        .from("Contractor")
+        .select("id, rating, Membership(planType)")
+        .or(`userId.eq.${user.id},email.eq.${user.email}`)
+        .maybeSingle();
+      if (data) {
+        const membership = Array.isArray(data.Membership) ? data.Membership[0] : data.Membership;
+        const { data: leads } = await admin.from("Lead").select("id, status, createdAt").eq("contractorId", data.id).order("createdAt", { ascending: false });
+        const { data: reviews } = await admin.from("Review").select("id, rating, reviewerName, reviewText, createdAt").eq("contractorId", data.id).eq("status", "approved");
+        contractor = { ...data, membership, leads: leads ?? [], reviews: reviews ?? [] };
+      }
     }
   } catch {}
 

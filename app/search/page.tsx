@@ -7,7 +7,7 @@ import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 import { ContractorCard } from "@/components/contractor/contractor-card";
 import { Button } from "@/components/ui/button";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -27,49 +27,33 @@ interface SearchPageProps {
 
 async function getSearchResults(searchParams: SearchPageProps["searchParams"]) {
   const { service, location, q } = searchParams;
-
   try {
-    const contractors = await prisma.contractor.findMany({
-      where: {
-        verifiedStatus: { not: "unclaimed" },
-        ...(service && {
-          services: {
-            some: {
-              service: { slug: service },
-            },
-          },
-        }),
-        ...(location && {
-          locations: {
-            some: {
-              location: { slug: location },
-            },
-          },
-        }),
-        ...(q && {
-          OR: [
-            { name: { contains: q, mode: "insensitive" } },
-            { description: { contains: q, mode: "insensitive" } },
-          ],
-        }),
-      },
-      include: {
-        services: {
-          include: { service: true },
-          where: { isPrimary: true },
-          take: 1,
-        },
-        membership: true,
-      },
-      orderBy: [
-        { membership: { planType: "desc" } },
-        { rating: "desc" },
-        { reviewCount: "desc" },
-      ],
-      take: 20,
-    });
+    const admin = createAdminClient();
+    let query = admin
+      .from("Contractor")
+      .select("*, ContractorService(id, isPrimary, Service(id, name, slug)), Membership(planType, status)")
+      .neq("verifiedStatus", "unclaimed")
+      .order("rating", { ascending: false })
+      .limit(20);
 
-    return contractors;
+    if (q) query = query.or(`name.ilike.%${q}%,description.ilike.%${q}%`);
+
+    const { data } = await query;
+    if (!data) return [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let results: any[] = data.map((c: any) => ({
+      ...c,
+      services: (c.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+      membership: Array.isArray(c.Membership) ? c.Membership[0] : c.Membership,
+    }));
+
+    // Client-side filter by service slug
+    if (service) {
+      results = results.filter((c) => c.services.some((s: any) => s.service?.slug === service));
+    }
+
+    return results;
   } catch {
     return [];
   }
@@ -77,10 +61,14 @@ async function getSearchResults(searchParams: SearchPageProps["searchParams"]) {
 
 async function getServices() {
   try {
-    return await prisma.service.findMany({
-      where: { isPublic: true, isActive: true },
-      orderBy: { sortOrder: "asc" },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Service")
+      .select("id, name, slug")
+      .eq("isPublic", true)
+      .eq("isActive", true)
+      .order("sortOrder", { ascending: true });
+    return data ?? [];
   } catch {
     return [];
   }
@@ -88,10 +76,13 @@ async function getServices() {
 
 async function getLocations() {
   try {
-    return await prisma.location.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Location")
+      .select("id, name, slug")
+      .eq("isActive", true)
+      .order("name", { ascending: true });
+    return data ?? [];
   } catch {
     return [];
   }

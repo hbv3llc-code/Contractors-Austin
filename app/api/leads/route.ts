@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { leadSchema } from "@/lib/validations/lead";
 import { sendNewLeadEmail } from "@/lib/email";
 import { z } from "zod";
 
-// Simple in-memory rate limiter (production should use Redis)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
-  const windowMs = 60 * 60 * 1000; // 1 hour
+  const windowMs = 60 * 60 * 1000;
   const limit = 3;
-
   const record = rateLimitMap.get(ip);
   if (!record || now > record.resetAt) {
     rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
@@ -24,7 +22,6 @@ function checkRateLimit(ip: string): boolean {
 
 export async function POST(request: NextRequest) {
   try {
-    // Rate limiting
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
     if (!checkRateLimit(ip)) {
       return NextResponse.json(
@@ -34,19 +31,16 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-
-    // Honeypot check
-    if (body._honeypot) {
-      return NextResponse.json({ success: true, data: { id: "fake" } });
-    }
+    if (body._honeypot) return NextResponse.json({ success: true, data: { id: "fake" } });
 
     const parsed = leadSchema.parse(body);
+    const admin = createAdminClient();
 
-    // Verify contractor exists and accepts leads
-    const contractor = await prisma.contractor.findUnique({
-      where: { id: parsed.contractorId },
-      include: { membership: true },
-    });
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id, name, email, verifiedStatus, Membership(planType)")
+      .eq("id", parsed.contractorId)
+      .maybeSingle();
 
     if (!contractor) {
       return NextResponse.json(
@@ -62,7 +56,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const planType = contractor.membership?.planType;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const membership = Array.isArray((contractor as any).Membership) ? (contractor as any).Membership[0] : (contractor as any).Membership;
+    const planType = membership?.planType;
     if (!planType || planType === "basic") {
       return NextResponse.json(
         { success: false, error: { code: "FORBIDDEN", message: "This contractor is on the Basic plan and does not receive leads" } },
@@ -70,35 +66,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const lead = await prisma.lead.create({
-      data: {
+    const { data: lead, error: leadError } = await admin
+      .from("Lead")
+      .insert({
         contractorId: parsed.contractorId,
-        serviceId: parsed.serviceId,
-        locationId: parsed.locationId,
+        serviceId: parsed.serviceId ?? null,
+        locationId: parsed.locationId ?? null,
         name: parsed.name,
         email: parsed.email,
-        phone: parsed.phone,
-        budgetRange: parsed.budgetRange,
+        phone: parsed.phone ?? null,
+        budgetRange: parsed.budgetRange ?? null,
         projectDescription: parsed.projectDescription,
-        preferredContactDay: parsed.preferredContactDay,
-        preferredContactTime: parsed.preferredContactTime,
-        isMultiQuote: parsed.isMultiQuote,
+        preferredContactDay: parsed.preferredContactDay ?? null,
+        preferredContactTime: parsed.preferredContactTime ?? null,
+        isMultiQuote: parsed.isMultiQuote ?? false,
         sourcePage: parsed.sourcePage ?? request.headers.get("referer"),
         submitterIp: ip,
-      },
-    });
+      })
+      .select()
+      .single();
 
-    // Send lead notification email to contractor
+    if (leadError) throw leadError;
+
     if (contractor.email) {
-      const service = parsed.serviceId
-        ? await prisma.service.findUnique({ where: { id: parsed.serviceId } })
-        : null;
+      let serviceName: string | undefined;
+      if (parsed.serviceId) {
+        const { data: svc } = await admin.from("Service").select("name").eq("id", parsed.serviceId).maybeSingle();
+        serviceName = svc?.name;
+      }
       sendNewLeadEmail(contractor.email, {
         contractorName: contractor.name,
         leadName: parsed.name,
         leadEmail: parsed.email,
         leadPhone: parsed.phone,
-        serviceName: service?.name,
+        serviceName,
         budgetRange: parsed.budgetRange,
         projectDescription: parsed.projectDescription,
         leadId: lead.id,
@@ -109,9 +110,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       const fields: Record<string, string> = {};
-      error.errors.forEach((e) => {
-        if (e.path[0]) fields[String(e.path[0])] = e.message;
-      });
+      error.errors.forEach((e) => { if (e.path[0]) fields[String(e.path[0])] = e.message; });
       return NextResponse.json(
         { success: false, error: { code: "VALIDATION_ERROR", message: "Validation failed", fields } },
         { status: 400 }

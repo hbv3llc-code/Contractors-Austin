@@ -1,81 +1,68 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ContractorCard } from "@/components/contractor/contractor-card";
 
-export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 interface Props {
   params: { serviceSlug: string; locationSlug: string };
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const [service, location] = await Promise.all([
-    prisma.service.findUnique({ where: { slug: params.serviceSlug } }),
-    prisma.location.findUnique({ where: { slug: params.locationSlug } }),
-  ]);
-
-  if (!service || !location) return {};
-
-  const seoPage = await prisma.seoPage.findFirst({
-    where: { pageType: "service_location", serviceId: service.id, locationId: location.id },
-  });
-
-  const defaultTitle = `${service.name} in ${location.name}, TX`;
-  const defaultDesc = `Find trusted ${service.name.toLowerCase()} contractors near ${location.name}. Compare ratings and get free quotes.`;
-
-  return {
-    title: seoPage?.title ?? defaultTitle,
-    description: seoPage?.metaDescription ?? defaultDesc,
-  };
+  try {
+    const admin = createAdminClient();
+    const [{ data: service }, { data: location }] = await Promise.all([
+      admin.from("Service").select("id, name").eq("slug", params.serviceSlug).maybeSingle(),
+      admin.from("Location").select("id, name").eq("slug", params.locationSlug).maybeSingle(),
+    ]);
+    if (!service || !location) return {};
+    const { data: seoPage } = await admin.from("SeoPage").select("title, metaDescription").eq("pageType", "service_location").eq("serviceId", service.id).eq("locationId", location.id).maybeSingle();
+    return {
+      title: seoPage?.title ?? `${service.name} in ${location.name}, TX`,
+      description: seoPage?.metaDescription ?? `Find trusted ${service.name.toLowerCase()} contractors near ${location.name}. Compare ratings and get free quotes.`,
+    };
+  } catch { return {}; }
 }
 
 export default async function ServiceLocationPage({ params }: Props) {
-  const [service, location] = await Promise.all([
-    prisma.service.findUnique({ where: { slug: params.serviceSlug } }),
-    prisma.location.findUnique({
-      where: { slug: params.locationSlug },
-      include: { parent: true },
-    }),
+  const admin = createAdminClient();
+
+  const [{ data: service }, { data: location }] = await Promise.all([
+    admin.from("Service").select("id, name, slug, isPublic").eq("slug", params.serviceSlug).maybeSingle().catch(() => ({ data: null })),
+    admin.from("Location").select("id, name, slug, isActive").eq("slug", params.locationSlug).maybeSingle().catch(() => ({ data: null })),
   ]);
 
   if (!service || !service.isPublic || !location || !location.isActive) notFound();
 
-  const [seoPage, contractorServices] = await Promise.all([
-    prisma.seoPage.findFirst({
-      where: { pageType: "service_location", serviceId: service.id, locationId: location.id },
-    }),
-    prisma.contractorService.findMany({
-      where: {
-        serviceId: service.id,
-        contractor: {
-          locations: { some: { locationId: location.id } },
-        },
-      },
-      include: {
-        contractor: {
-          include: {
-            membership: true,
-            services: { include: { service: true } },
-          },
-        },
-      },
-      orderBy: [
-        { contractor: { membership: { planType: "desc" } } },
-        { contractor: { rating: "desc" } },
-      ],
-      take: 30,
-    }),
+  const [{ data: seoPage }, { data: clData }] = await Promise.all([
+    admin.from("SeoPage").select("title, metaDescription, introContent").eq("pageType", "service_location").eq("serviceId", service.id).eq("locationId", location.id).maybeSingle(),
+    // Get contractors that serve this service AND this location
+    admin.from("ContractorLocation")
+      .select("Contractor(*, ContractorService!inner(id, isPrimary, Service(id, name, slug)), Membership(planType, status))")
+      .eq("locationId", location.id)
+      .eq("Contractor.ContractorService.serviceId", service.id)
+      .limit(30)
+      .catch(() => ({ data: [] })),
   ]);
 
-  const contractors = contractorServices.map((cs) => cs.contractor);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contractors = (clData ?? []).map((cl: any) => {
+    const c = Array.isArray(cl.Contractor) ? cl.Contractor[0] : cl.Contractor;
+    if (!c) return null;
+    return {
+      ...c,
+      services: (c.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+      membership: Array.isArray(c.Membership) ? c.Membership[0] : c.Membership,
+    };
+  }).filter(Boolean);
+
   const introContent = seoPage?.introContent as { body?: string } | null;
   const title = seoPage?.title ?? `${service.name} in ${location.name}, TX`;
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
-      {/* Breadcrumb */}
       <nav className="text-sm text-muted-foreground mb-6">
         <Link href="/" className="hover:text-primary">Home</Link>
         <span className="mx-2">/</span>
@@ -113,7 +100,8 @@ export default async function ServiceLocationPage({ params }: Props) {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
-          {contractors.map((contractor) => (
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {contractors.map((contractor: any) => (
             <ContractorCard key={contractor.id} contractor={contractor} />
           ))}
         </div>

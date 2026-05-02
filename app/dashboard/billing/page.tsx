@@ -5,7 +5,7 @@ import { CreditCard, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Billing" };
@@ -14,14 +14,19 @@ export default async function BillingPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  let membership = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let membership: any = null;
   try {
     if (user) {
-      const contractor = await prisma.contractor.findFirst({
-        where: { OR: [{ userId: user.id }, { email: user.email! }] },
-        include: { membership: true },
-      });
-      membership = contractor?.membership;
+      const admin = createAdminClient();
+      const { data } = await admin
+        .from("Contractor")
+        .select("Membership(planType, status, currentPeriodEnd, stripeCustomerId)")
+        .or(`userId.eq.${user.id},email.eq.${user.email}`)
+        .maybeSingle();
+      if (data) {
+        membership = Array.isArray(data.Membership) ? data.Membership[0] : data.Membership;
+      }
     }
   } catch {}
 

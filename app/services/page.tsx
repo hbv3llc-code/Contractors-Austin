@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = 'force-dynamic';
 
@@ -10,11 +10,23 @@ export const metadata: Metadata = {
 };
 
 export default async function ServicesPage() {
-  const services = await prisma.service.findMany({
-    where: { isPublic: true, parentId: null },
-    include: { children: { where: { isPublic: true, isActive: true }, orderBy: { sortOrder: "asc" } } },
-    orderBy: { sortOrder: "asc" },
-  });
+  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let services: any[] = [];
+  try {
+    const { data: allServices } = await admin
+      .from("Service")
+      .select("id, name, slug, description, parentId")
+      .eq("isPublic", true)
+      .eq("isActive", true)
+      .order("sortOrder", { ascending: true });
+    const all = allServices ?? [];
+    const topLevel = all.filter((s: any) => !s.parentId);
+    services = topLevel.map((s: any) => ({
+      ...s,
+      children: all.filter((c: any) => c.parentId === s.id),
+    }));
+  } catch {}
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { prisma } from "@/lib/prisma";
 
 type DocType = "license" | "insurance";
 
@@ -9,45 +8,33 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const admin = createAdminClient();
 
-    const contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId: user.id }, { email: user.email! }] },
-    });
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id")
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
 
-    if (!contractor) {
-      return NextResponse.json({ error: "Contractor not found" }, { status: 404 });
-    }
+    if (!contractor) return NextResponse.json({ error: "Contractor not found" }, { status: 404 });
 
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
     const docType = formData.get("type") as DocType;
 
-    if (!file) {
-      return NextResponse.json({ error: "No file provided" }, { status: 400 });
-    }
-
-    if (!["license", "insurance"].includes(docType)) {
-      return NextResponse.json({ error: "Invalid document type" }, { status: 400 });
-    }
+    if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
+    if (!["license", "insurance"].includes(docType)) return NextResponse.json({ error: "Invalid document type" }, { status: 400 });
 
     const allowedTypes = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
-    if (!allowedTypes.includes(file.type)) {
-      return NextResponse.json({ error: "File must be an image or PDF" }, { status: 400 });
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: "File must be under 10MB" }, { status: 400 });
-    }
+    if (!allowedTypes.includes(file.type)) return NextResponse.json({ error: "File must be an image or PDF" }, { status: 400 });
+    if (file.size > 10 * 1024 * 1024) return NextResponse.json({ error: "File must be under 10MB" }, { status: 400 });
 
     const ext = file.name.split(".").pop() ?? "pdf";
     const filename = `${contractor.id}/${docType}-${Date.now()}.${ext}`;
 
-    const adminSupabase = createAdminClient();
-    const { error: uploadError } = await adminSupabase.storage
+    const { error: uploadError } = await admin.storage
       .from("contractor-documents")
       .upload(filename, file, { contentType: file.type, upsert: true });
 
@@ -56,18 +43,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Upload failed" }, { status: 500 });
     }
 
-    const { data: { publicUrl } } = adminSupabase.storage
-      .from("contractor-documents")
-      .getPublicUrl(filename);
+    const { data: { publicUrl } } = admin.storage.from("contractor-documents").getPublicUrl(filename);
 
     const updateData = docType === "license"
       ? { licenseFileUrl: publicUrl }
       : { insuranceFileUrl: publicUrl };
 
-    await prisma.contractor.update({
-      where: { id: contractor.id },
-      data: updateData,
-    });
+    await admin.from("Contractor").update(updateData).eq("id", contractor.id);
 
     return NextResponse.json({ success: true, url: publicUrl });
   } catch (error) {

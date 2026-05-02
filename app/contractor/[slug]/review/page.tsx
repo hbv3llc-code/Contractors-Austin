@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { ReviewForm } from "@/components/forms/review-form";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Metadata } from "next";
 
 interface ReviewPageProps {
@@ -11,11 +11,9 @@ interface ReviewPageProps {
 
 export async function generateMetadata({ params }: ReviewPageProps): Promise<Metadata> {
   try {
-    const contractor = await prisma.contractor.findUnique({
-      where: { slug: params.slug },
-      select: { name: true },
-    });
-    return { title: `Write a Review for ${contractor?.name ?? "Contractor"}` };
+    const admin = createAdminClient();
+    const { data } = await admin.from("Contractor").select("name").eq("slug", params.slug).maybeSingle();
+    return { title: `Write a Review for ${data?.name ?? "Contractor"}` };
   } catch {
     return { title: "Write a Review" };
   }
@@ -24,10 +22,14 @@ export async function generateMetadata({ params }: ReviewPageProps): Promise<Met
 export default async function ReviewPage({ params }: ReviewPageProps) {
   let contractor = null;
   try {
-    contractor = await prisma.contractor.findUnique({
-      where: { slug: params.slug, verifiedStatus: { not: "unclaimed" } },
-      select: { id: true, name: true, slug: true },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Contractor")
+      .select("id, name, slug, verifiedStatus")
+      .eq("slug", params.slug)
+      .neq("verifiedStatus", "unclaimed")
+      .maybeSingle();
+    contractor = data;
   } catch {}
 
   if (!contractor) notFound();

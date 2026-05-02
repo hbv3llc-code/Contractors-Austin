@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
 
 const daySchema = z.object({
@@ -23,18 +23,23 @@ export async function PATCH(request: NextRequest) {
     const body = await request.json();
     const { contractorId, hours } = schema.parse(body);
 
-    const contractor = await prisma.contractor.findFirst({
-      where: {
-        id: contractorId,
-        OR: [{ userId: user.id }, { email: user.email! }],
-      },
-    });
+    const admin = createAdminClient();
+
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id")
+      .eq("id", contractorId)
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
+
     if (!contractor) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-    await prisma.contractor.update({
-      where: { id: contractorId },
-      data: { hours },
-    });
+    const { error } = await admin
+      .from("Contractor")
+      .update({ hours })
+      .eq("id", contractorId);
+
+    if (error) throw error;
 
     return NextResponse.json({ success: true });
   } catch (error) {

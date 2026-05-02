@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import OnboardingForm from "@/components/forms/onboarding-form";
 import { VerifiedToast } from "@/components/dashboard/verified-toast";
 import type { Metadata } from "next";
@@ -20,10 +20,7 @@ export default async function OnboardingPage() {
   let contractor: any = null;
 
   try {
-    const admin = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const admin = createAdminClient();
     const { data } = await admin
       .from("Contractor")
       .select("id, ownerName, name, address, city, zip, phone, email, ContractorService(id, isPrimary, Service(id, name))")

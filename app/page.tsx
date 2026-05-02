@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ContractorCard } from "@/components/contractor/contractor-card";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const serviceCategories = [
   { name: "Painters", slug: "painters", emoji: "🎨", description: "Interior & exterior painting" },
@@ -33,18 +33,21 @@ const serviceCategories = [
 
 async function getFeaturedContractors() {
   try {
-    return await prisma.contractor.findMany({
-      where: {
-        verifiedStatus: { in: ["verified", "claimed"] },
-        membership: { planType: { in: ["premium", "featured"] } },
-      },
-      include: {
-        services: { include: { service: true }, where: { isPrimary: true }, take: 1 },
-        membership: true,
-      },
-      orderBy: [{ membership: { planType: "desc" } }, { rating: "desc" }],
-      take: 6,
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Contractor")
+      .select("*, ContractorService(id, isPrimary, Service(id, name, slug)), Membership!inner(planType, status)")
+      .in("verifiedStatus", ["verified", "claimed"])
+      .in("Membership.planType", ["premium", "featured"])
+      .order("rating", { ascending: false })
+      .limit(6);
+    if (!data) return [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return data.map((c: any) => ({
+      ...c,
+      services: (c.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+      membership: Array.isArray(c.Membership) ? c.Membership[0] : c.Membership,
+    }));
   } catch {
     return [];
   }

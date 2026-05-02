@@ -1,11 +1,11 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { MapPin } from "lucide-react";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Service Areas | Austin Metro Contractors",
@@ -13,14 +13,18 @@ export const metadata: Metadata = {
 };
 
 export default async function LocationsPage() {
-  const locations = await prisma.location.findMany({
-    where: { isActive: true, parentId: null },
-    include: {
-      children: { where: { isActive: true }, orderBy: { name: "asc" } },
-      _count: { select: { contractors: true } },
-    },
-    orderBy: { name: "asc" },
-  }).catch(() => []);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let locations: any[] = [];
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Location")
+      .select("id, name, slug")
+      .eq("isActive", true)
+      .is("parentId", null)
+      .order("name", { ascending: true });
+    locations = data ?? [];
+  } catch {}
 
   return (
     <>
@@ -36,45 +40,20 @@ export default async function LocationsPage() {
 
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground mb-2">
-              Austin Metro Service Areas
-            </h1>
-            <p className="text-muted-foreground">
-              Browse contractors by city. We cover all of Austin and surrounding communities.
-            </p>
+            <h1 className="text-3xl font-bold text-foreground mb-2">Austin Metro Service Areas</h1>
+            <p className="text-muted-foreground">Browse contractors by city. We cover all of Austin and surrounding communities.</p>
           </div>
 
           {locations.length === 0 ? (
-            // Fallback to hardcoded Austin cities if DB is empty
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[
-                { name: "Austin", slug: "austin", count: null },
-                { name: "Round Rock", slug: "round-rock", count: null },
-                { name: "Cedar Park", slug: "cedar-park", count: null },
-                { name: "Pflugerville", slug: "pflugerville", count: null },
-                { name: "Georgetown", slug: "georgetown", count: null },
-                { name: "Kyle", slug: "kyle", count: null },
-                { name: "Buda", slug: "buda", count: null },
-                { name: "San Marcos", slug: "san-marcos", count: null },
-                { name: "Leander", slug: "leander", count: null },
-                { name: "Hutto", slug: "hutto", count: null },
-                { name: "Bastrop", slug: "bastrop", count: null },
-                { name: "Dripping Springs", slug: "dripping-springs", count: null },
-                { name: "Bee Cave", slug: "bee-cave", count: null },
-              ].map((city) => (
-                <Link
-                  key={city.slug}
-                  href={`/${city.slug}-contractors`}
-                  className="flex items-center justify-between rounded-xl border border-border bg-white p-5 shadow-sm hover:border-primary hover:shadow-md transition-all group"
-                >
+              {["Austin","Round Rock","Cedar Park","Pflugerville","Georgetown","Kyle","Buda","San Marcos","Leander","Hutto","Bastrop","Dripping Springs","Bee Cave"].map((city) => (
+                <Link key={city} href={`/${city.toLowerCase().replace(/\s+/g, "-")}-contractors`} className="flex items-center justify-between rounded-xl border border-border bg-white p-5 shadow-sm hover:border-primary hover:shadow-md transition-all group">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-blue-50 flex items-center justify-center">
                       <MapPin className="h-5 w-5 text-primary" />
                     </div>
                     <div>
-                      <p className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                        {city.name}
-                      </p>
+                      <p className="font-semibold text-foreground group-hover:text-primary transition-colors">{city}</p>
                       <p className="text-xs text-muted-foreground">Austin Metro Area</p>
                     </div>
                   </div>
@@ -84,30 +63,16 @@ export default async function LocationsPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {locations.map((location) => (
-                <Link
-                  key={location.id}
-                  href={`/${location.slug}-contractors`}
-                  className="flex items-center justify-between rounded-xl border border-border bg-white p-5 shadow-sm hover:border-primary hover:shadow-md transition-all group"
-                >
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {locations.map((location: any) => (
+                <Link key={location.id} href={`/${location.slug}-contractors`} className="flex items-center justify-between rounded-xl border border-border bg-white p-5 shadow-sm hover:border-primary hover:shadow-md transition-all group">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-lg bg-blue-50 flex items-center justify-center">
                       <MapPin className="h-5 w-5 text-primary" />
                     </div>
-                    <div>
-                      <p className="font-semibold text-foreground group-hover:text-primary transition-colors">
-                        {location.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {location._count.contractors > 0
-                          ? `${location._count.contractors} contractor${location._count.contractors !== 1 ? "s" : ""}`
-                          : "Austin Metro Area"}
-                      </p>
-                    </div>
+                    <p className="font-semibold text-foreground group-hover:text-primary transition-colors">{location.name}</p>
                   </div>
-                  {location.children.length > 0 && (
-                    <span className="text-xs text-muted-foreground">{location.children.length} areas</span>
-                  )}
+                  <span className="text-muted-foreground text-sm">→</span>
                 </Link>
               ))}
             </div>

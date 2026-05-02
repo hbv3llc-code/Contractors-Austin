@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
-import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ListingSetupForm } from "@/components/forms/listing-setup-form";
 import { PhotoUpload } from "@/components/dashboard/photo-upload";
 import { DocumentUpload } from "@/components/dashboard/document-upload";
@@ -18,10 +18,7 @@ export default async function ListingPage() {
   let contractor: any = null;
   try {
     if (user) {
-      const admin = createAdminClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-      );
+      const admin = createAdminClient();
       const { data } = await admin
         .from("Contractor")
         .select("*, ContractorService(*, Service(*)), Membership(*), ContractorPhoto(id, url, caption, sortOrder)")

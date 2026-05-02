@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { MapPin } from "lucide-react";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ContractorCard } from "@/components/contractor/contractor-card";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
@@ -14,50 +14,49 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const location = await prisma.location.findUnique({ where: { slug: params.locationSlug } }).catch(() => null);
-  if (!location) return {};
-  return {
-    title: `Contractors in ${location.name}, TX | Find Local Pros`,
-    description: `Find trusted contractors in ${location.name}, TX. Compare ratings, read reviews, and get free quotes from verified local pros.`,
-  };
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin.from("Location").select("name").eq("slug", params.locationSlug).maybeSingle();
+    if (!data) return {};
+    return {
+      title: `Contractors in ${data.name}, TX | Find Local Pros`,
+      description: `Find trusted contractors in ${data.name}, TX. Compare ratings, read reviews, and get free quotes from verified local pros.`,
+    };
+  } catch { return {}; }
 }
 
 export default async function LocationPage({ params }: Props) {
-  const location = await prisma.location.findUnique({
-    where: { slug: params.locationSlug },
-    include: {
-      parent: true,
-      children: { where: { isActive: true }, orderBy: { name: "asc" } },
-    },
-  }).catch(() => null);
+  const admin = createAdminClient();
+
+  const { data: location } = await admin
+    .from("Location")
+    .select("id, name, slug, isActive, parentId, Location!Location_parentId_fkey(id, name, slug)")
+    .eq("slug", params.locationSlug)
+    .maybeSingle()
+    .catch(() => ({ data: null }));
 
   if (!location || !location.isActive) notFound();
 
-  const contractorLocations = await prisma.contractorLocation.findMany({
-    where: { locationId: location.id },
-    include: {
-      contractor: {
-        include: {
-          membership: true,
-          services: { include: { service: true } },
-        },
-      },
-    },
-    orderBy: [
-      { contractor: { membership: { planType: "desc" } } },
-      { contractor: { rating: "desc" } },
-    ],
-    take: 40,
-  }).catch(() => []);
+  // Get children (sub-areas) and contractors in parallel
+  const [{ data: childrenData }, { data: clData }, { data: servicesData }] = await Promise.all([
+    admin.from("Location").select("id, name, slug").eq("parentId", location.id).eq("isActive", true).order("name", { ascending: true }),
+    admin.from("ContractorLocation").select("Contractor(*, ContractorService(id, isPrimary, Service(id, name, slug)), Membership(planType, status))").eq("locationId", location.id).limit(40),
+    admin.from("Service").select("id, name, slug").eq("isPublic", true).eq("isActive", true).is("parentId", null).order("sortOrder", { ascending: true }).limit(10),
+  ]);
 
-  const contractors = contractorLocations.map((cl) => cl.contractor);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contractors = (clData ?? []).map((cl: any) => {
+    const c = Array.isArray(cl.Contractor) ? cl.Contractor[0] : cl.Contractor;
+    if (!c) return null;
+    return {
+      ...c,
+      services: (c.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+      membership: Array.isArray(c.Membership) ? c.Membership[0] : c.Membership,
+    };
+  }).filter(Boolean);
 
-  // Get popular services for this location (for cross-links)
-  const services = await prisma.service.findMany({
-    where: { isPublic: true, isActive: true, parentId: null },
-    orderBy: { sortOrder: "asc" },
-    take: 10,
-  }).catch(() => []);
+  const children = childrenData ?? [];
+  const services = servicesData ?? [];
 
   return (
     <>
@@ -91,11 +90,11 @@ export default async function LocationPage({ params }: Props) {
               </div>
 
               {/* Neighborhood sub-areas */}
-              {location.children.length > 0 && (
+              {children.length > 0 && (
                 <div className="mb-6">
                   <h2 className="text-sm font-semibold text-muted-foreground uppercase mb-2">Neighborhoods & Areas</h2>
                   <div className="flex flex-wrap gap-2">
-                    {location.children.map((child) => (
+                    {children.map((child: any) => (
                       <Link
                         key={child.id}
                         href={`/locations/${child.slug}`}
