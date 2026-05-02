@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { ListingSetupForm } from "@/components/forms/listing-setup-form";
 import { PhotoUpload } from "@/components/dashboard/photo-upload";
 import { DocumentUpload } from "@/components/dashboard/document-upload";
@@ -14,18 +14,28 @@ export default async function ListingPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  let contractor = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let contractor: any = null;
   try {
     if (user) {
-      contractor = await prisma.contractor.findFirst({
-        where: { OR: [{ userId: user.id }, { email: user.email! }] },
-        include: {
-          services: { include: { service: true } },
-          membership: true,
-          photos: { orderBy: { sortOrder: "asc" } },
-          // hours is a plain JSON field — no include needed
-        },
-      });
+      const admin = createAdminClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      const { data } = await admin
+        .from("Contractor")
+        .select("*, ContractorService(*, Service(*)), Membership(*), ContractorPhoto(id, url, caption, sortOrder)")
+        .or(`userId.eq.${user.id},email.eq.${user.email}`)
+        .maybeSingle();
+      if (data) {
+        // Normalize Supabase response to match component expectations
+        contractor = {
+          ...data,
+          photos: [...(data.ContractorPhoto ?? [])].sort((a: any, b: any) => a.sortOrder - b.sortOrder),
+          membership: Array.isArray(data.Membership) ? data.Membership[0] : data.Membership,
+          services: (data.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+        };
+      }
     }
   } catch {}
 

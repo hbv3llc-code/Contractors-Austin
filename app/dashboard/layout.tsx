@@ -3,18 +3,11 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { LayoutDashboard, User, Inbox, CreditCard, Settings, LogOut, BarChart2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { VerifiedToast } from "@/components/dashboard/verified-toast";
 
-function isOnboardingComplete(contractor: {
-  ownerName: string | null;
-  name: string;
-  address: string | null;
-  city: string | null;
-  phone: string | null;
-  email: string | null;
-  services: { id: string }[];
-} | null): boolean {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function isOnboardingComplete(contractor: any): boolean {
   if (!contractor) return false;
   return !!(
     contractor.ownerName &&
@@ -23,7 +16,7 @@ function isOnboardingComplete(contractor: {
     contractor.city &&
     contractor.phone &&
     contractor.email &&
-    contractor.services.length > 0
+    contractor.ContractorService?.length > 0
   );
 }
 
@@ -46,14 +39,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   let contractor = null;
   try {
-    contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId: user.id }, { email: user.email! }] },
-      select: {
-        ownerName: true, name: true, address: true,
-        city: true, phone: true, email: true,
-        services: { select: { id: true } },
-      },
-    });
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data } = await admin
+      .from("Contractor")
+      .select("ownerName, name, address, city, phone, email, ContractorService(id)")
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
+    contractor = data;
   } catch {}
 
   if (!isOnboardingComplete(contractor)) {

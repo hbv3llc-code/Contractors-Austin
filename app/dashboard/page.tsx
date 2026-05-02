@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { ArrowRight, Inbox, Star, Settings, TrendingUp, AlertCircle, CheckCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Metadata } from "next";
@@ -14,16 +14,25 @@ export const metadata: Metadata = {
 
 async function getContractorData(userId: string, userEmail: string) {
   try {
-    const contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId }, { email: userEmail }] },
-      include: {
-        membership: true,
-        leads: { where: { status: "new" }, take: 5, orderBy: { createdAt: "desc" } },
-        reviews: { where: { status: "pending" }, take: 3 },
-      },
-    });
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id, name, slug, rating, reviewCount, responseRate, profileCompleteness, Membership(*)")
+      .or(`userId.eq.${userId},email.eq.${userEmail}`)
+      .maybeSingle();
 
-    return contractor;
+    if (!contractor) return null;
+
+    const { data: leads } = await admin
+      .from("Lead")
+      .select("id")
+      .eq("contractorId", contractor.id)
+      .eq("status", "new");
+
+    return { ...contractor, leads: leads ?? [] };
   } catch {
     return null;
   }
@@ -34,7 +43,10 @@ export default async function DashboardPage() {
   const { data: { user } } = await supabase.auth.getUser();
   const contractor = await getContractorData(user?.id ?? "", user?.email ?? "");
 
-  const plan = contractor?.membership?.planType ?? "basic";
+  // Supabase returns Membership as an array from the join
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const membership = Array.isArray((contractor as any)?.Membership) ? (contractor as any).Membership[0] : (contractor as any)?.Membership;
+  const plan = membership?.planType ?? "basic";
   const newLeads = contractor?.leads?.length ?? 0;
   const completeness = contractor?.profileCompleteness ?? 0;
 
@@ -54,13 +66,13 @@ export default async function DashboardPage() {
               <Badge variant={plan === "premium" ? "premium" : plan === "featured" ? "featured" : "secondary"}>
                 {plan.charAt(0).toUpperCase() + plan.slice(1)}
               </Badge>
-              {contractor?.membership?.status === "active" && (
+              {membership?.status === "active" && (
                 <Badge variant="success">Active</Badge>
               )}
             </div>
-            {contractor?.membership?.currentPeriodEnd && (
+            {membership?.currentPeriodEnd && (
               <p className="text-sm text-muted-foreground">
-                Next billing: {new Date(contractor.membership.currentPeriodEnd).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                Next billing: {new Date(membership.currentPeriodEnd).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
               </p>
             )}
           </div>

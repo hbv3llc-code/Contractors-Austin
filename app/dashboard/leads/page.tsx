@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import Link from "next/link";
 import { CheckCircle, Phone, Mail, Clock, DollarSign } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatPhone } from "@/lib/utils";
@@ -26,19 +26,29 @@ export default async function LeadsPage() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  let leads: Awaited<ReturnType<typeof prisma.lead.findMany<{ include: { service: true } }>>> = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let leads: any[] = [];
 
   try {
     if (user) {
-      const contractor = await prisma.contractor.findFirst({
-        where: { OR: [{ userId: user.id }, { email: user.email! }] },
-      });
+      const admin = createAdminClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+      const { data: contractor } = await admin
+        .from("Contractor")
+        .select("id")
+        .or(`userId.eq.${user.id},email.eq.${user.email}`)
+        .maybeSingle();
+
       if (contractor) {
-        leads = await prisma.lead.findMany({
-          where: { contractorId: contractor.id, status: { not: "spam" } },
-          orderBy: { createdAt: "desc" },
-          include: { service: true },
-        });
+        const { data } = await admin
+          .from("Lead")
+          .select("*, Service(id, name)")
+          .eq("contractorId", contractor.id)
+          .neq("status", "spam")
+          .order("createdAt", { ascending: false });
+        leads = (data ?? []).map((l: any) => ({ ...l, service: l.Service }));
       }
     }
   } catch {}

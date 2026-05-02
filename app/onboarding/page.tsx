@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import OnboardingForm from "@/components/forms/onboarding-form";
 import { VerifiedToast } from "@/components/dashboard/verified-toast";
 import type { Metadata } from "next";
@@ -16,13 +16,26 @@ export default async function OnboardingPage() {
 
   if (!user) redirect("/login");
 
-  let contractor = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let contractor: any = null;
 
   try {
-    contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId: user.id }, { email: user.email! }] },
-      include: { services: { include: { service: true } } },
-    });
+    const admin = createAdminClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data } = await admin
+      .from("Contractor")
+      .select("id, ownerName, name, address, city, zip, phone, email, ContractorService(id, isPrimary, Service(id, name))")
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
+    if (data) {
+      contractor = {
+        ...data,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        services: (data.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+      };
+    }
   } catch {}
 
   return (
