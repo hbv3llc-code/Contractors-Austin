@@ -26,12 +26,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ServicePage({ params }: Props) {
   const admin = createAdminClient();
 
-  const { data: service } = await admin
-    .from("Service")
-    .select("id, name, slug, isPublic, description")
-    .eq("slug", params.serviceSlug)
-    .maybeSingle()
-    .catch(() => ({ data: null }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let service: any = null;
+  try {
+    const { data } = await admin
+      .from("Service")
+      .select("id, name, slug, isPublic, description")
+      .eq("slug", params.serviceSlug)
+      .maybeSingle();
+    service = data;
+  } catch {}
 
   if (!service || !service.isPublic) notFound();
 

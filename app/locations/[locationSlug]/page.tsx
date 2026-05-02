@@ -28,12 +28,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function LocationPage({ params }: Props) {
   const admin = createAdminClient();
 
-  const { data: location } = await admin
-    .from("Location")
-    .select("id, name, slug, isActive, parentId, Location!Location_parentId_fkey(id, name, slug)")
-    .eq("slug", params.locationSlug)
-    .maybeSingle()
-    .catch(() => ({ data: null }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let location: any = null;
+  try {
+    const { data } = await admin
+      .from("Location")
+      .select("id, name, slug, isActive, parentId")
+      .eq("slug", params.locationSlug)
+      .maybeSingle();
+    location = data;
+  } catch {}
 
   if (!location || !location.isActive) notFound();
 

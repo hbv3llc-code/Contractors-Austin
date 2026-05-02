@@ -57,14 +57,16 @@ export default async function AnalyticsPage() {
     );
   }
 
-  const leads = contractor?.leads ?? [];
-  const reviews = contractor?.reviews ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const leads: any[] = contractor?.leads ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const reviews: any[] = contractor?.reviews ?? [];
 
   // Lead status breakdown
-  const statusCounts = leads.reduce<Record<string, number>>((acc, lead) => {
+  const statusCounts = leads.reduce((acc: Record<string, number>, lead: any) => {
     acc[lead.status] = (acc[lead.status] ?? 0) + 1;
     return acc;
-  }, {});
+  }, {} as Record<string, number>);
 
   const wonLeads = statusCounts["job_won"] ?? 0;
   const lostLeads = statusCounts["job_lost"] ?? 0;
@@ -76,7 +78,7 @@ export default async function AnalyticsPage() {
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const label = d.toLocaleString("en-US", { month: "short", year: "2-digit" });
-    const count = leads.filter((l) => {
+    const count = leads.filter((l: any) => {
       const ld = new Date(l.createdAt);
       return ld.getMonth() === d.getMonth() && ld.getFullYear() === d.getFullYear();
     }).length;
@@ -152,7 +154,7 @@ export default async function AnalyticsPage() {
           <p className="text-sm text-muted-foreground">No leads yet</p>
         ) : (
           <div className="space-y-3">
-            {Object.entries(statusCounts).map(([status, count]) => (
+            {Object.entries(statusCounts).map(([status, count]: [string, number]) => (
               <div key={status} className="flex items-center gap-3">
                 <span className="w-28 text-sm text-muted-foreground">{statusLabels[status] ?? status}</span>
                 <div className="flex-1 bg-gray-100 rounded-full h-2">

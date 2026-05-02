@@ -29,23 +29,32 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ServiceLocationPage({ params }: Props) {
   const admin = createAdminClient();
 
-  const [{ data: service }, { data: location }] = await Promise.all([
-    admin.from("Service").select("id, name, slug, isPublic").eq("slug", params.serviceSlug).maybeSingle().catch(() => ({ data: null })),
-    admin.from("Location").select("id, name, slug, isActive").eq("slug", params.locationSlug).maybeSingle().catch(() => ({ data: null })),
-  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let service: any = null, location: any = null;
+  try {
+    const [sr, lr] = await Promise.all([
+      admin.from("Service").select("id, name, slug, isPublic").eq("slug", params.serviceSlug).maybeSingle(),
+      admin.from("Location").select("id, name, slug, isActive").eq("slug", params.locationSlug).maybeSingle(),
+    ]);
+    service = sr.data;
+    location = lr.data;
+  } catch {}
 
   if (!service || !service.isPublic || !location || !location.isActive) notFound();
 
-  const [{ data: seoPage }, { data: clData }] = await Promise.all([
-    admin.from("SeoPage").select("title, metaDescription, introContent").eq("pageType", "service_location").eq("serviceId", service.id).eq("locationId", location.id).maybeSingle(),
-    // Get contractors that serve this service AND this location
-    admin.from("ContractorLocation")
-      .select("Contractor(*, ContractorService!inner(id, isPrimary, Service(id, name, slug)), Membership(planType, status))")
-      .eq("locationId", location.id)
-      .eq("Contractor.ContractorService.serviceId", service.id)
-      .limit(30)
-      .catch(() => ({ data: [] })),
-  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let seoPage: any = null, clData: any[] = [];
+  try {
+    const [sp, cl] = await Promise.all([
+      admin.from("SeoPage").select("title, metaDescription, introContent").eq("pageType", "service_location").eq("serviceId", service.id).eq("locationId", location.id).maybeSingle(),
+      admin.from("ContractorLocation")
+        .select("Contractor(*, ContractorService(id, isPrimary, Service(id, name, slug)), Membership(planType, status))")
+        .eq("locationId", location.id)
+        .limit(30),
+    ]);
+    seoPage = sp.data;
+    clData = cl.data ?? [];
+  } catch {}
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const contractors = (clData ?? []).map((cl: any) => {
