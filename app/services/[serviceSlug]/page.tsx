@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
-import { ContractorCard } from "@/components/contractor-card";
+import { ContractorCard } from "@/components/contractor/contractor-card";
 
 export const revalidate = 3600;
 
