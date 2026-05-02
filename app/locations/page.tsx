@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 
-export const revalidate = 3600;
+export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: "Service Areas | Austin Metro Contractors",
