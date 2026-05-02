@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { Suspense } from "react";
 import { LayoutDashboard, User, Inbox, CreditCard, Settings, LogOut, BarChart2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { VerifiedToast } from "@/components/dashboard/verified-toast";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -65,7 +67,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </aside>
 
           {/* Main content */}
-          <main className="flex-1 min-w-0">{children}</main>
+          <main className="flex-1 min-w-0">
+            <Suspense>
+              <VerifiedToast />
+            </Suspense>
+            {children}
+          </main>
         </div>
       </div>
     </div>
