@@ -11,7 +11,8 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}?verified=true`);
+      // Send to onboarding — dashboard layout will redirect back once complete
+      return NextResponse.redirect(`${origin}/onboarding?verified=true`);
     }
   }
 

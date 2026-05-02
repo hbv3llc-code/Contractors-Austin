@@ -3,7 +3,29 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { LayoutDashboard, User, Inbox, CreditCard, Settings, LogOut, BarChart2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { prisma } from "@/lib/prisma";
 import { VerifiedToast } from "@/components/dashboard/verified-toast";
+
+function isOnboardingComplete(contractor: {
+  ownerName: string | null;
+  name: string;
+  address: string | null;
+  city: string | null;
+  phone: string | null;
+  email: string | null;
+  services: { id: string }[];
+} | null): boolean {
+  if (!contractor) return false;
+  return !!(
+    contractor.ownerName &&
+    contractor.name &&
+    contractor.address &&
+    contractor.city &&
+    contractor.phone &&
+    contractor.email &&
+    contractor.services.length > 0
+  );
+}
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -20,6 +42,22 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   if (!user) {
     redirect("/login");
+  }
+
+  let contractor = null;
+  try {
+    contractor = await prisma.contractor.findFirst({
+      where: { OR: [{ userId: user.id }, { email: user.email! }] },
+      select: {
+        ownerName: true, name: true, address: true,
+        city: true, phone: true, email: true,
+        services: { select: { id: true } },
+      },
+    });
+  } catch {}
+
+  if (!isOnboardingComplete(contractor)) {
+    redirect("/onboarding");
   }
 
   return (

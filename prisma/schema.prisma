@@ -82,6 +82,7 @@ enum ClaimStatus {
 model Contractor {
   id                  String         @id @default(uuid())
   userId              String?        @unique
+  ownerName           String?
   name                String
   slug                String         @unique
   description         String?

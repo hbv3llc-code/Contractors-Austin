@@ -9,15 +9,27 @@ export function VerifiedToast() {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (searchParams.get("verified") === "true") {
+    const verified = searchParams.get("verified");
+    const welcome = searchParams.get("welcome");
+
+    if (verified === "true") {
       toast({
         title: "Email verified!",
-        description: "Your account is active. Welcome to ContractorsAustin!",
+        description: "Your account is active. Complete your business setup below.",
         duration: 6000,
       });
-      // Remove the param from the URL without a page reload
+    } else if (welcome === "true") {
+      toast({
+        title: "You're all set!",
+        description: "Your business listing is live on ContractorsAustin.",
+        duration: 6000,
+      });
+    }
+
+    if (verified || welcome) {
       const url = new URL(window.location.href);
       url.searchParams.delete("verified");
+      url.searchParams.delete("welcome");
       window.history.replaceState({}, "", url.toString());
     }
   }, [searchParams, toast]);
