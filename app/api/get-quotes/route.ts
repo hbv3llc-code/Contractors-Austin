@@ -1,17 +1,9 @@
-/**
- * POST /api/get-quotes
- * Multi-contractor lead routing: matches up to 4 Featured/Premium contractors
- * in the selected city + service category, then fans out lead notifications.
- */
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { sendNewLeadEmail } from "@/lib/email";
 import { z } from "zod";
 
-const BUDGET_OPTIONS = [
-  "Under $500", "$500–$1,000", "$1,000–$5,000",
-  "$5,000–$15,000", "$15,000–$50,000", "$50,000+",
-] as const;
+const BUDGET_OPTIONS = ["Under $500", "$500–$1,000", "$1,000–$5,000", "$5,000–$15,000", "$15,000–$50,000", "$50,000+"] as const;
 
 const schema = z.object({
   service: z.string().min(1),
@@ -27,85 +19,62 @@ const schema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-
-    // Honeypot
-    if (body._honeypot) {
-      return NextResponse.json({ success: true });
-    }
+    if (body._honeypot) return NextResponse.json({ success: true });
 
     const parsed = schema.parse(body);
+    const admin = createAdminClient();
 
-    // Find matching service
-    const service = await prisma.service.findFirst({
-      where: {
-        name: { equals: parsed.service, mode: "insensitive" },
-        isPublic: true,
-      },
-    });
+    const [{ data: service }, { data: location }] = await Promise.all([
+      admin.from("Service").select("id").ilike("name", parsed.service).eq("isPublic", true).maybeSingle(),
+      admin.from("Location").select("id").ilike("name", parsed.city).maybeSingle(),
+    ]);
 
-    // Find matching location
-    const location = await prisma.location.findFirst({
-      where: { name: { equals: parsed.city, mode: "insensitive" } },
-    });
+    // Find up to 4 matching contractors (Featured/Premium)
+    let { data: contractors } = await admin
+      .from("Contractor")
+      .select("id, name, email, Membership!inner(planType, status)")
+      .in("verifiedStatus", ["claimed", "verified"])
+      .in("Membership.planType", ["featured", "premium"])
+      .eq("Membership.status", "active")
+      .order("rating", { ascending: false })
+      .limit(4);
 
-    // Find up to 4 contractors matching service + location, Featured/Premium only
-    const contractors = await prisma.contractor.findMany({
-      where: {
-        verifiedStatus: { in: ["claimed", "verified"] },
-        membership: { planType: { in: ["featured", "premium"] }, status: "active" },
-        ...(service
-          ? { services: { some: { serviceId: service.id } } }
-          : {}),
-        ...(location
-          ? { locations: { some: { locationId: location.id } } }
-          : { city: { equals: parsed.city, mode: "insensitive" } }),
-      },
-      include: { membership: true },
-      orderBy: [{ membership: { planType: "desc" } }, { rating: "desc" }],
-      take: 4,
-    });
-
-    if (contractors.length === 0) {
-      // Fallback: any Featured/Premium contractors in Austin area
-      const fallback = await prisma.contractor.findMany({
-        where: {
-          verifiedStatus: { in: ["claimed", "verified"] },
-          membership: { planType: { in: ["featured", "premium"] }, status: "active" },
-        },
-        include: { membership: true },
-        orderBy: [{ membership: { planType: "desc" } }, { rating: "desc" }],
-        take: 4,
-      });
-      contractors.push(...fallback);
+    if (!contractors || contractors.length === 0) {
+      const { data: fallback } = await admin
+        .from("Contractor")
+        .select("id, name, email, Membership!inner(planType, status)")
+        .in("verifiedStatus", ["claimed", "verified"])
+        .in("Membership.planType", ["featured", "premium"])
+        .eq("Membership.status", "active")
+        .order("rating", { ascending: false })
+        .limit(4);
+      contractors = fallback ?? [];
     }
 
-    const ip =
-      request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
 
-    // Create leads for each matched contractor
     const leads = await Promise.all(
-      contractors.map((contractor) =>
-        prisma.lead.create({
-          data: {
-            contractorId: contractor.id,
-            serviceId: service?.id,
-            locationId: location?.id,
-            name: parsed.name,
-            email: parsed.email,
-            phone: parsed.phone,
-            budgetRange: parsed.budget,
-            projectDescription: parsed.description,
-            isMultiQuote: true,
-            sourcePage: "/get-quotes",
-            submitterIp: ip,
-          },
-        })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (contractors ?? []).map((contractor: any) =>
+        admin.from("Lead").insert({
+          contractorId: contractor.id,
+          serviceId: service?.id ?? null,
+          locationId: location?.id ?? null,
+          name: parsed.name,
+          email: parsed.email,
+          phone: parsed.phone ?? null,
+          budgetRange: parsed.budget ?? null,
+          projectDescription: parsed.description,
+          isMultiQuote: true,
+          sourcePage: "/get-quotes",
+          submitterIp: ip,
+        }).select().single()
       )
     );
 
-    // Fan out email notifications
-    const emailPromises = contractors.map((contractor, i) => {
+    const emailPromises = (contractors ?? []).map((contractor: any, i: number) => {
       if (!contractor.email) return Promise.resolve();
+      const lead = leads[i]?.data;
       return sendNewLeadEmail(contractor.email, {
         contractorName: contractor.name,
         leadName: parsed.name,
@@ -114,25 +83,17 @@ export async function POST(request: NextRequest) {
         serviceName: parsed.service,
         budgetRange: parsed.budget,
         projectDescription: parsed.description,
-        leadId: leads[i].id,
-      }).catch((err) => console.error(`Failed to email contractor ${contractor.id}:`, err));
+        leadId: lead?.id ?? "",
+      }).catch((err: unknown) => console.error(`Failed to email contractor ${contractor.id}:`, err));
     });
     await Promise.allSettled(emailPromises);
 
-    return NextResponse.json({
-      success: true,
-      data: { matchedCount: contractors.length },
-    });
+    return NextResponse.json({ success: true, data: { matchedCount: contractors?.length ?? 0 } });
   } catch (error) {
     if (error instanceof z.ZodError) {
       const fields: Record<string, string> = {};
-      error.errors.forEach((e) => {
-        if (e.path[0]) fields[String(e.path[0])] = e.message;
-      });
-      return NextResponse.json(
-        { success: false, error: "Validation failed", fields },
-        { status: 400 }
-      );
+      error.errors.forEach((e) => { if (e.path[0]) fields[String(e.path[0])] = e.message; });
+      return NextResponse.json({ success: false, error: "Validation failed", fields }, { status: 400 });
     }
     console.error("POST /api/get-quotes error:", error);
     return NextResponse.json({ success: false, error: "Failed to submit request" }, { status: 500 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -14,18 +14,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId: user.id }, { email: user.email! }] },
-      include: { membership: true },
-    });
+    const admin = createAdminClient();
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id, Membership(stripeCustomerId)")
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
 
-    if (!contractor?.membership?.stripeCustomerId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const membership = contractor ? (Array.isArray(contractor.Membership) ? contractor.Membership[0] : contractor.Membership) as any : null;
+
+    if (!membership?.stripeCustomerId) {
       return NextResponse.json({ error: "No billing account found" }, { status: 404 });
     }
 
     const returnUrl = `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard/billing`;
     const session = await stripe.billingPortal.sessions.create({
-      customer: contractor.membership.stripeCustomerId,
+      customer: membership.stripeCustomerId,
       return_url: returnUrl,
     });
 

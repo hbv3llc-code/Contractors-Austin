@@ -7,7 +7,7 @@ import type { Metadata } from "next";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 import { Button } from "@/components/ui/button";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface GuidePageProps {
   params: { slug: string };
@@ -15,9 +15,14 @@ interface GuidePageProps {
 
 async function getGuide(slug: string) {
   try {
-    return await prisma.guidePost.findUnique({
-      where: { slug, isPublished: true },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("GuidePost")
+      .select("id, slug, title, excerpt, content, metaTitle, metaDesc, createdAt, isPublished")
+      .eq("slug", slug)
+      .eq("isPublished", true)
+      .maybeSingle();
+    return data;
   } catch {
     return null;
   }
@@ -34,11 +39,12 @@ export async function generateMetadata({ params }: GuidePageProps): Promise<Meta
 
 export async function generateStaticParams() {
   try {
-    const guides = await prisma.guidePost.findMany({
-      where: { isPublished: true },
-      select: { slug: true },
-    });
-    return guides.map((g) => ({ slug: g.slug }));
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("GuidePost")
+      .select("slug")
+      .eq("isPublished", true);
+    return (data ?? []).map((g: { slug: string }) => ({ slug: g.slug }));
   } catch {
     return [];
   }
@@ -48,8 +54,7 @@ export default async function GuidePage({ params }: GuidePageProps) {
   const guide = await getGuide(params.slug);
   if (!guide) notFound();
 
-  // Convert simple markdown to HTML-ish rendering
-  const contentParagraphs = guide.content.split("\n").filter((line) => line.trim());
+  const contentParagraphs = guide.content.split("\n").filter((line: string) => line.trim());
 
   return (
     <>
@@ -89,7 +94,7 @@ export default async function GuidePage({ params }: GuidePageProps) {
             </header>
 
             <div className="prose prose-gray max-w-none">
-              {contentParagraphs.map((para, i) => {
+              {contentParagraphs.map((para: string, i: number) => {
                 if (para.startsWith("# ")) {
                   return <h1 key={i} className="text-2xl font-bold text-foreground mt-6 mb-3">{para.slice(2)}</h1>;
                 }

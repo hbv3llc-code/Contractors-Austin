@@ -1,23 +1,31 @@
 export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import ImportUploader from "./import-uploader";
 
 export const metadata: Metadata = { title: "Import Listings | Admin" };
 
 async function getBatches() {
   try {
-    return await prisma.importBatch.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 20,
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("ImportBatch")
+      .select("id, filename, totalRows, successfulRows, skippedRows, errorRows, status, createdAt")
+      .order("createdAt", { ascending: false })
+      .limit(20);
+    return data ?? [];
   } catch { return []; }
 }
 
 async function getUnclaimedCount() {
   try {
-    return prisma.importedListing.count({ where: { status: "unclaimed" } });
+    const admin = createAdminClient();
+    const { count } = await admin
+      .from("ImportedListing")
+      .select("*", { count: "exact", head: true })
+      .eq("status", "unclaimed");
+    return count ?? 0;
   } catch { return 0; }
 }
 
@@ -70,7 +78,8 @@ export default async function AdminImportsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {batches.map((batch) => (
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {batches.map((batch: any) => (
                 <tr key={batch.id}>
                   <td className="px-4 py-3 font-medium truncate max-w-[180px]">{batch.filename}</td>
                   <td className="px-4 py-3 text-right text-muted-foreground">{batch.totalRows}</td>

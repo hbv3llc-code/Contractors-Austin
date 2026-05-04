@@ -5,7 +5,7 @@ import { BookOpen, Clock } from "lucide-react";
 import type { Metadata } from "next";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const metadata: Metadata = {
   title: "Home Improvement Guides | ContractorsAustin",
@@ -15,17 +15,13 @@ export const metadata: Metadata = {
 
 async function getGuides() {
   try {
-    return await prisma.guidePost.findMany({
-      where: { isPublished: true },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        excerpt: true,
-        createdAt: true,
-      },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("GuidePost")
+      .select("id, slug, title, excerpt, createdAt")
+      .eq("isPublished", true)
+      .order("createdAt", { ascending: false });
+    return data ?? [];
   } catch {
     return [];
   }
@@ -68,7 +64,8 @@ export default async function GuidesIndexPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {guides.map((guide) => (
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {guides.map((guide: any) => (
                 <Link key={guide.id} href={`/guides/${guide.slug}`} className="group block">
                   <article className="rounded-xl border border-border bg-white p-6 shadow-sm hover:shadow-md hover:border-primary/30 transition-all h-full flex flex-col">
                     <div className="flex-1">
@@ -84,7 +81,7 @@ export default async function GuidesIndexPage() {
                     <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-auto pt-4 border-t border-border">
                       <Clock className="h-3.5 w-3.5" />
                       <span>
-                        {guide.createdAt.toLocaleDateString("en-US", {
+                        {new Date(guide.createdAt).toLocaleDateString("en-US", {
                           month: "long",
                           day: "numeric",
                           year: "numeric",

@@ -4,7 +4,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
 
 const schema = z.object({ code: z.string().min(4).max(12) });
@@ -21,11 +21,13 @@ export async function POST(
     }
 
     const { code } = schema.parse(await request.json());
+    const admin = createAdminClient();
 
-    const claim = await prisma.claimRequest.findUnique({
-      where: { id: params.id },
-      include: { listing: true },
-    });
+    const { data: claim } = await admin
+      .from("ClaimRequest")
+      .select("id, listingId, memberId, status, sentAt, verificationCode")
+      .eq("id", params.id)
+      .maybeSingle();
 
     if (!claim) {
       return NextResponse.json({ error: "Claim not found" }, { status: 404 });
@@ -37,10 +39,12 @@ export async function POST(
       return NextResponse.json({ error: "This claim is no longer pending" }, { status: 409 });
     }
 
-    // Check expiry (30 minutes from sentAt)
-    const expiresAt = new Date(claim.sentAt.getTime() + 30 * 60 * 1000);
+    const expiresAt = new Date(new Date(claim.sentAt).getTime() + 30 * 60 * 1000);
     if (new Date() > expiresAt) {
-      await prisma.claimRequest.update({ where: { id: params.id }, data: { status: "expired" } });
+      await admin
+        .from("ClaimRequest")
+        .update({ status: "expired" })
+        .eq("id", params.id);
       return NextResponse.json({ error: "Verification code has expired" }, { status: 410 });
     }
 
@@ -48,16 +52,9 @@ export async function POST(
       return NextResponse.json({ error: "Incorrect verification code" }, { status: 422 });
     }
 
-    // Mark claim verified and listing claimed
-    await prisma.$transaction([
-      prisma.claimRequest.update({
-        where: { id: params.id },
-        data: { status: "verified", verifiedAt: new Date() },
-      }),
-      prisma.importedListing.update({
-        where: { id: claim.listingId },
-        data: { status: "claimed", claimedByMemberId: user.id, claimedAt: new Date() },
-      }),
+    await Promise.all([
+      admin.from("ClaimRequest").update({ status: "verified", verifiedAt: new Date().toISOString() }).eq("id", params.id),
+      admin.from("ImportedListing").update({ status: "claimed", claimedByMemberId: user.id, claimedAt: new Date().toISOString() }).eq("id", claim.listingId),
     ]);
 
     return NextResponse.json({ success: true, data: { listingId: claim.listingId } });

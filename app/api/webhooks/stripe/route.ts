@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   sendSubscriptionConfirmedEmail,
   sendSubscriptionCancelledEmail,
@@ -25,6 +25,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
+  const admin = createAdminClient();
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -37,34 +39,30 @@ export async function POST(request: NextRequest) {
 
         const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
 
-        await prisma.membership.upsert({
-          where: { contractorId },
-          update: {
-            planType: plan,
-            billingCycle: cycle,
-            stripeCustomerId: session.customer as string,
-            stripeSubscriptionId: session.subscription as string,
-            status: "active",
-            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-          },
-          create: {
+        await admin.from("Membership").upsert(
+          {
             contractorId,
             planType: plan,
             billingCycle: cycle,
             stripeCustomerId: session.customer as string,
             stripeSubscriptionId: session.subscription as string,
             status: "active",
-            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+            currentPeriodEnd: new Date(subscription.current_period_end * 1000).toISOString(),
           },
-        });
+          { onConflict: "contractorId" }
+        );
 
-        // Update contractor status to claimed if unclaimed
-        const contractor = await prisma.contractor.update({
-          where: { id: contractorId },
-          data: { verifiedStatus: "claimed" },
-        }).catch(() => null);
+        let contractor: { email: string | null; name: string } | null = null;
+        try {
+          const { data } = await admin
+            .from("Contractor")
+            .update({ verifiedStatus: "claimed" })
+            .eq("id", contractorId)
+            .select("email, name")
+            .single();
+          contractor = data;
+        } catch {}
 
-        // Send subscription confirmed email
         if (contractor?.email) {
           sendSubscriptionConfirmedEmail(
             contractor.email,
@@ -79,7 +77,6 @@ export async function POST(request: NextRequest) {
       case "customer.subscription.updated": {
         const subscription = event.data.object as Stripe.Subscription;
         const planItem = subscription.items.data[0];
-        // Determine plan from price ID
         const priceId = planItem.price.id;
         let planType: "featured" | "premium" | "basic" = "basic";
         if (priceId === process.env.STRIPE_FEATURED_MONTHLY_PRICE_ID || priceId === process.env.STRIPE_FEATURED_ANNUAL_PRICE_ID) {
@@ -88,36 +85,44 @@ export async function POST(request: NextRequest) {
           planType = "premium";
         }
 
-        await prisma.membership.updateMany({
-          where: { stripeSubscriptionId: subscription.id },
-          data: {
+        await admin
+          .from("Membership")
+          .update({
             planType,
             status: subscription.status === "active" ? "active" : subscription.status === "past_due" ? "past_due" : "cancelled",
-            currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-          },
-        });
+            currentPeriodEnd: new Date(subscription.current_period_end * 1000).toISOString(),
+          })
+          .eq("stripeSubscriptionId", subscription.id);
         break;
       }
 
       case "customer.subscription.deleted": {
         const subscription = event.data.object as Stripe.Subscription;
-        const cancelled = await prisma.membership.findFirst({
-          where: { stripeSubscriptionId: subscription.id },
-          include: { contractor: true },
-        });
-        await prisma.membership.updateMany({
-          where: { stripeSubscriptionId: subscription.id },
-          data: { status: "cancelled", planType: "basic" },
-        });
-        if (cancelled?.contractor?.email) {
-          const periodEnd = cancelled.currentPeriodEnd
-            ? cancelled.currentPeriodEnd.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
-            : "the end of your billing period";
-          sendSubscriptionCancelledEmail(
-            cancelled.contractor.email,
-            cancelled.contractor.name,
-            periodEnd
-          ).catch((err) => console.error("Failed to send cancellation email:", err));
+
+        const { data: cancelled } = await admin
+          .from("Membership")
+          .select("contractorId, currentPeriodEnd, Contractor(email, name)")
+          .eq("stripeSubscriptionId", subscription.id)
+          .maybeSingle();
+
+        await admin
+          .from("Membership")
+          .update({ status: "cancelled", planType: "basic" })
+          .eq("stripeSubscriptionId", subscription.id);
+
+        if (cancelled) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const contractor = Array.isArray(cancelled.Contractor) ? cancelled.Contractor[0] : cancelled.Contractor as any;
+          if (contractor?.email) {
+            const periodEnd = cancelled.currentPeriodEnd
+              ? new Date(cancelled.currentPeriodEnd).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+              : "the end of your billing period";
+            sendSubscriptionCancelledEmail(
+              contractor.email,
+              contractor.name,
+              periodEnd
+            ).catch((err) => console.error("Failed to send cancellation email:", err));
+          }
         }
         break;
       }
@@ -125,23 +130,30 @@ export async function POST(request: NextRequest) {
       case "invoice.payment_failed": {
         const invoice = event.data.object as Stripe.Invoice;
         if (invoice.subscription) {
-          const failedMembership = await prisma.membership.findFirst({
-            where: { stripeSubscriptionId: invoice.subscription as string },
-            include: { contractor: true },
-          });
-          await prisma.membership.updateMany({
-            where: { stripeSubscriptionId: invoice.subscription as string },
-            data: { status: "past_due" },
-          });
-          if (failedMembership?.contractor?.email) {
-            const amount = invoice.amount_due
-              ? `$${(invoice.amount_due / 100).toFixed(2)}`
-              : "your subscription amount";
-            sendPaymentFailedEmail(
-              failedMembership.contractor.email,
-              failedMembership.contractor.name,
-              amount
-            ).catch((err) => console.error("Failed to send payment failed email:", err));
+          const { data: failedMembership } = await admin
+            .from("Membership")
+            .select("contractorId, Contractor(email, name)")
+            .eq("stripeSubscriptionId", invoice.subscription as string)
+            .maybeSingle();
+
+          await admin
+            .from("Membership")
+            .update({ status: "past_due" })
+            .eq("stripeSubscriptionId", invoice.subscription as string);
+
+          if (failedMembership) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const contractor = Array.isArray(failedMembership.Contractor) ? failedMembership.Contractor[0] : failedMembership.Contractor as any;
+            if (contractor?.email) {
+              const amount = invoice.amount_due
+                ? `$${(invoice.amount_due / 100).toFixed(2)}`
+                : "your subscription amount";
+              sendPaymentFailedEmail(
+                contractor.email,
+                contractor.name,
+                amount
+              ).catch((err) => console.error("Failed to send payment failed email:", err));
+            }
           }
         }
         break;
@@ -151,14 +163,13 @@ export async function POST(request: NextRequest) {
         const invoice = event.data.object as Stripe.Invoice;
         if (invoice.subscription) {
           const sub = await stripe.subscriptions.retrieve(invoice.subscription as string);
-          await prisma.membership.updateMany({
-            where: { stripeSubscriptionId: invoice.subscription as string },
-            data: {
+          await admin
+            .from("Membership")
+            .update({
               status: "active",
-              currentPeriodEnd: new Date(sub.current_period_end * 1000),
-            },
-          });
-          // Receipt is sent by Stripe directly if configured in Dashboard
+              currentPeriodEnd: new Date(sub.current_period_end * 1000).toISOString(),
+            })
+            .eq("stripeSubscriptionId", invoice.subscription as string);
         }
         break;
       }

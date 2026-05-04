@@ -1,29 +1,41 @@
 export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import ReviewModerationRow from "./review-moderation-row";
 
 export const metadata: Metadata = { title: "Review Moderation | Admin" };
 
 async function getPendingReviews() {
   try {
-    return await prisma.review.findMany({
-      where: { status: "pending" },
-      orderBy: { createdAt: "asc" },
-      include: { contractor: { select: { name: true, slug: true } } },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Review")
+      .select("id, rating, reviewerName, reviewText, status, createdAt, contractorId, Contractor(name, slug)")
+      .eq("status", "pending")
+      .order("createdAt", { ascending: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data ?? []).map((r: any) => ({
+      ...r,
+      contractor: Array.isArray(r.Contractor) ? r.Contractor[0] : r.Contractor,
+    }));
   } catch { return []; }
 }
 
 async function getRecentReviews() {
   try {
-    return await prisma.review.findMany({
-      where: { status: { not: "pending" } },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      include: { contractor: { select: { name: true, slug: true } } },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Review")
+      .select("id, rating, reviewerName, status, createdAt, contractorId, Contractor(name, slug)")
+      .neq("status", "pending")
+      .order("createdAt", { ascending: false })
+      .limit(20);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data ?? []).map((r: any) => ({
+      ...r,
+      contractor: Array.isArray(r.Contractor) ? r.Contractor[0] : r.Contractor,
+    }));
   } catch { return []; }
 }
 
@@ -45,7 +57,8 @@ export default async function AdminReviewsPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {pending.map((review) => (
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {pending.map((review: any) => (
               <ReviewModerationRow key={review.id} review={review} />
             ))}
           </div>
@@ -68,10 +81,11 @@ export default async function AdminReviewsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {recent.map((r) => (
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                {recent.map((r: any) => (
                   <tr key={r.id}>
                     <td className="px-4 py-3 font-medium">{r.reviewerName}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{r.contractor.name}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{r.contractor?.name ?? "—"}</td>
                     <td className="px-4 py-3">{"★".repeat(r.rating)}</td>
                     <td className="px-4 py-3">
                       <span className={`text-xs font-medium ${

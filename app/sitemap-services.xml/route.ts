@@ -1,25 +1,24 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://contractorsaustin.com";
 
 export async function GET() {
   try {
-    const [services, locations] = await Promise.all([
-      prisma.service.findMany({ where: { isPublic: true, isActive: true }, select: { slug: true } }),
-      prisma.location.findMany({ where: { isActive: true }, select: { slug: true } }),
+    const admin = createAdminClient();
+    const [{ data: services }, { data: locations }] = await Promise.all([
+      admin.from("Service").select("slug").eq("isPublic", true).eq("isActive", true),
+      admin.from("Location").select("slug").eq("isActive", true),
     ]);
 
     const urls: string[] = [];
 
-    // Service pages
-    services.forEach((s) => {
+    (services ?? []).forEach((s: { slug: string }) => {
       urls.push(`<url><loc>${siteUrl}/${s.slug}</loc><changefreq>daily</changefreq><priority>0.8</priority></url>`);
     });
 
-    // Service × Location pages
-    services.forEach((s) => {
-      locations.forEach((l) => {
+    (services ?? []).forEach((s: { slug: string }) => {
+      (locations ?? []).forEach((l: { slug: string }) => {
         urls.push(`<url><loc>${siteUrl}/${l.slug}-${s.slug}</loc><changefreq>daily</changefreq><priority>0.7</priority></url>`);
       });
     });

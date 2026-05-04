@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://contractorsaustin.com";
 
 export async function GET() {
   try {
-    const contractors = await prisma.contractor.findMany({
-      select: { slug: true, updatedAt: true },
-    });
+    const admin = createAdminClient();
+    const { data: contractors } = await admin
+      .from("Contractor")
+      .select("slug, updatedAt");
 
-    const urls = contractors.map(
-      (c) =>
-        `<url><loc>${siteUrl}/contractor/${c.slug}</loc><lastmod>${c.updatedAt.toISOString().split("T")[0]}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>`
+    const urls = (contractors ?? []).map(
+      (c: { slug: string; updatedAt: string }) =>
+        `<url><loc>${siteUrl}/contractor/${c.slug}</loc><lastmod>${new Date(c.updatedAt).toISOString().split("T")[0]}</lastmod><changefreq>weekly</changefreq><priority>0.6</priority></url>`
     );
 
     const xml = `<?xml version="1.0" encoding="UTF-8"?>

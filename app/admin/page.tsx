@@ -1,33 +1,43 @@
 export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Users, TrendingUp, Star, Inbox } from "lucide-react";
 
 export const metadata: Metadata = { title: "Admin Dashboard" };
 
 async function getStats() {
   try {
+    const admin = createAdminClient();
     const [
-      totalContractors,
-      totalMembers,
-      featuredCount,
-      premiumCount,
-      totalLeads,
-      newLeads,
-      pendingReviews,
-      pendingClaims,
+      { count: totalContractors },
+      { count: totalMembers },
+      { count: featuredCount },
+      { count: premiumCount },
+      { count: totalLeads },
+      { count: newLeads },
+      { count: pendingReviews },
+      { count: pendingClaims },
     ] = await Promise.all([
-      prisma.contractor.count(),
-      prisma.membership.count({ where: { planType: { not: "basic" } } }),
-      prisma.membership.count({ where: { planType: "featured", status: "active" } }),
-      prisma.membership.count({ where: { planType: "premium", status: "active" } }),
-      prisma.lead.count(),
-      prisma.lead.count({ where: { status: "new" } }),
-      prisma.review.count({ where: { status: "pending" } }),
-      prisma.claimRequest.count({ where: { status: "pending" } }),
+      admin.from("Contractor").select("*", { count: "exact", head: true }),
+      admin.from("Membership").select("*", { count: "exact", head: true }).neq("planType", "basic"),
+      admin.from("Membership").select("*", { count: "exact", head: true }).eq("planType", "featured").eq("status", "active"),
+      admin.from("Membership").select("*", { count: "exact", head: true }).eq("planType", "premium").eq("status", "active"),
+      admin.from("Lead").select("*", { count: "exact", head: true }),
+      admin.from("Lead").select("*", { count: "exact", head: true }).eq("status", "new"),
+      admin.from("Review").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      admin.from("ClaimRequest").select("*", { count: "exact", head: true }).eq("status", "pending"),
     ]);
-    return { totalContractors, totalMembers, featuredCount, premiumCount, totalLeads, newLeads, pendingReviews, pendingClaims };
+    return {
+      totalContractors: totalContractors ?? 0,
+      totalMembers: totalMembers ?? 0,
+      featuredCount: featuredCount ?? 0,
+      premiumCount: premiumCount ?? 0,
+      totalLeads: totalLeads ?? 0,
+      newLeads: newLeads ?? 0,
+      pendingReviews: pendingReviews ?? 0,
+      pendingClaims: pendingClaims ?? 0,
+    };
   } catch {
     return { totalContractors: 0, totalMembers: 0, featuredCount: 0, premiumCount: 0, totalLeads: 0, newLeads: 0, pendingReviews: 0, pendingClaims: 0 };
   }
@@ -35,11 +45,18 @@ async function getStats() {
 
 async function getRecentLeads() {
   try {
-    return await prisma.lead.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 10,
-      include: { contractor: { select: { name: true } }, service: { select: { name: true } } },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("Lead")
+      .select("id, name, status, createdAt, Contractor(name), Service(name)")
+      .order("createdAt", { ascending: false })
+      .limit(10);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data ?? []).map((lead: any) => ({
+      ...lead,
+      contractor: Array.isArray(lead.Contractor) ? lead.Contractor[0] : lead.Contractor,
+      service: Array.isArray(lead.Service) ? lead.Service[0] : lead.Service,
+    }));
   } catch { return []; }
 }
 
@@ -102,12 +119,13 @@ export default async function AdminDashboard() {
           {recentLeads.length === 0 ? (
             <p className="px-6 py-8 text-sm text-muted-foreground text-center">No leads yet</p>
           ) : (
-            recentLeads.map((lead) => (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            recentLeads.map((lead: any) => (
               <div key={lead.id} className="px-6 py-3 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-foreground">{lead.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {lead.service?.name ?? "General"} → {lead.contractor.name}
+                    {lead.service?.name ?? "General"} → {lead.contractor?.name ?? "—"}
                   </p>
                 </div>
                 <div className="text-right">

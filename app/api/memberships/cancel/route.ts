@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -14,17 +14,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId: user.id }, { email: user.email! }] },
-      include: { membership: true },
-    });
+    const admin = createAdminClient();
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id, Membership(stripeSubscriptionId)")
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
 
-    if (!contractor?.membership?.stripeSubscriptionId) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const membership = contractor ? (Array.isArray(contractor.Membership) ? contractor.Membership[0] : contractor.Membership) as any : null;
+
+    if (!membership?.stripeSubscriptionId) {
       return NextResponse.json({ error: "No active subscription found" }, { status: 404 });
     }
 
-    // Cancel at period end — contractor keeps access until billing period ends
-    await stripe.subscriptions.update(contractor.membership.stripeSubscriptionId, {
+    await stripe.subscriptions.update(membership.stripeSubscriptionId, {
       cancel_at_period_end: true,
     });
 

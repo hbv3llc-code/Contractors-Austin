@@ -2,30 +2,49 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Badge } from "@/components/ui/badge";
 
 export const metadata: Metadata = { title: "Members | Admin" };
 
 async function getContractors(search?: string) {
   try {
-    return await prisma.contractor.findMany({
-      where: search
-        ? {
-            OR: [
-              { name: { contains: search, mode: "insensitive" } },
-              { email: { contains: search, mode: "insensitive" } },
-              { city: { contains: search, mode: "insensitive" } },
-            ],
-          }
-        : undefined,
-      include: {
-        membership: true,
-        _count: { select: { leads: true, reviews: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-    });
+    const admin = createAdminClient();
+    let query = admin
+      .from("Contractor")
+      .select("id, name, email, city, slug, verifiedStatus, createdAt, Membership(planType, status)")
+      .order("createdAt", { ascending: false })
+      .limit(100);
+
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%`);
+    }
+
+    const { data: contractors } = await query;
+    if (!contractors || contractors.length === 0) return [];
+
+    // Fetch lead and review counts for all contractors
+    const ids = contractors.map((c) => c.id);
+    const [{ data: leadData }, { data: reviewData }] = await Promise.all([
+      admin.from("Lead").select("contractorId").in("contractorId", ids),
+      admin.from("Review").select("contractorId").in("contractorId", ids),
+    ]);
+
+    const leadCounts = (leadData ?? []).reduce((acc: Record<string, number>, l: { contractorId: string }) => {
+      acc[l.contractorId] = (acc[l.contractorId] ?? 0) + 1;
+      return acc;
+    }, {});
+    const reviewCounts = (reviewData ?? []).reduce((acc: Record<string, number>, r: { contractorId: string }) => {
+      acc[r.contractorId] = (acc[r.contractorId] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return contractors.map((c: any) => ({
+      ...c,
+      membership: Array.isArray(c.Membership) ? c.Membership[0] : c.Membership,
+      _count: { leads: leadCounts[c.id] ?? 0, reviews: reviewCounts[c.id] ?? 0 },
+    }));
   } catch { return []; }
 }
 
@@ -87,7 +106,8 @@ export default async function AdminMembersPage({
                 </td>
               </tr>
             ) : (
-              contractors.map((c) => (
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              contractors.map((c: any) => (
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <Link

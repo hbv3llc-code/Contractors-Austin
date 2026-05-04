@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim());
@@ -28,22 +28,26 @@ export async function PATCH(
   try {
     const body = await request.json();
     const updates = patchSchema.parse(body);
+    const admin = createAdminClient();
 
     const contractorData: Record<string, unknown> = {};
     if (updates.verifiedStatus) contractorData.verifiedStatus = updates.verifiedStatus;
     if (updates.insuranceVerified !== undefined) contractorData.insuranceVerified = updates.insuranceVerified;
 
-    const contractor = await prisma.contractor.update({
-      where: { id: params.id },
-      data: contractorData,
-    });
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .update(contractorData)
+      .eq("id", params.id)
+      .select()
+      .single();
 
     if (updates.planType) {
-      await prisma.membership.upsert({
-        where: { contractorId: params.id },
-        update: { planType: updates.planType },
-        create: { contractorId: params.id, planType: updates.planType },
-      });
+      await admin
+        .from("Membership")
+        .upsert(
+          { contractorId: params.id, planType: updates.planType },
+          { onConflict: "contractorId" }
+        );
     }
 
     return NextResponse.json({ success: true, data: contractor });
@@ -64,7 +68,8 @@ export async function DELETE(
   }
 
   try {
-    await prisma.contractor.delete({ where: { id: params.id } });
+    const admin = createAdminClient();
+    await admin.from("Contractor").delete().eq("id", params.id);
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: "Failed to delete contractor" }, { status: 500 });

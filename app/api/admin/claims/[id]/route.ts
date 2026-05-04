@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim());
@@ -22,25 +22,26 @@ export async function PATCH(
 
   try {
     const { action, adminNotes } = schema.parse(await request.json());
+    const admin = createAdminClient();
 
     const newStatus = action === "approve" ? "verified" : "rejected";
 
-    const claim = await prisma.claimRequest.update({
-      where: { id: params.id },
-      data: {
+    const { data: claim } = await admin
+      .from("ClaimRequest")
+      .update({
         status: newStatus,
-        verifiedAt: action === "approve" ? new Date() : undefined,
+        verifiedAt: action === "approve" ? new Date().toISOString() : undefined,
         adminNotes,
-      },
-      include: { listing: true },
-    });
+      })
+      .eq("id", params.id)
+      .select("id, listingId, memberId, status")
+      .single();
 
-    // If approved, mark listing as claimed
-    if (action === "approve") {
-      await prisma.importedListing.update({
-        where: { id: claim.listingId },
-        data: { status: "claimed", claimedAt: new Date(), claimedByMemberId: claim.memberId },
-      });
+    if (action === "approve" && claim) {
+      await admin
+        .from("ImportedListing")
+        .update({ status: "claimed", claimedAt: new Date().toISOString(), claimedByMemberId: claim.memberId })
+        .eq("id", claim.listingId);
     }
 
     return NextResponse.json({ success: true, data: claim });

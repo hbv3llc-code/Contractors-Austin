@@ -1,22 +1,23 @@
 export const dynamic = "force-dynamic";
 
 import type { Metadata } from "next";
-import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import AdminClaimActions from "./claim-actions";
 
 export const metadata: Metadata = { title: "Claim Requests | Admin" };
 
 async function getClaims() {
   try {
-    return await prisma.claimRequest.findMany({
-      orderBy: { sentAt: "desc" },
-      include: {
-        listing: {
-          select: { businessName: true, city: true, phone: true, email: true },
-        },
-      },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("ClaimRequest")
+      .select("id, listingId, memberId, verificationMethod, status, sentAt, adminNotes, ImportedListing(businessName, city, phone, email)")
+      .order("sentAt", { ascending: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data ?? []).map((c: any) => ({
+      ...c,
+      listing: Array.isArray(c.ImportedListing) ? c.ImportedListing[0] : c.ImportedListing,
+    }));
   } catch { return []; }
 }
 
@@ -29,8 +30,10 @@ const statusColor: Record<string, string> = {
 
 export default async function AdminClaimsPage() {
   const claims = await getClaims();
-  const pending = claims.filter((c) => c.status === "pending");
-  const others = claims.filter((c) => c.status !== "pending");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pending = claims.filter((c: any) => c.status === "pending");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const others = claims.filter((c: any) => c.status !== "pending");
 
   return (
     <div className="space-y-8">
@@ -45,13 +48,14 @@ export default async function AdminClaimsPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {pending.map((claim) => (
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {pending.map((claim: any) => (
               <div key={claim.id} className="rounded-xl border border-border bg-white p-5 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <p className="font-semibold text-foreground">{claim.listing.businessName}</p>
+                    <p className="font-semibold text-foreground">{claim.listing?.businessName ?? "—"}</p>
                     <p className="text-sm text-muted-foreground">
-                      {claim.listing.city} · {claim.verificationMethod.replace("_", " ")}
+                      {claim.listing?.city} · {claim.verificationMethod.replace("_", " ")}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       Member: {claim.memberId} · Sent: {new Date(claim.sentAt).toLocaleString()}
@@ -83,9 +87,10 @@ export default async function AdminClaimsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {others.map((claim) => (
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                {others.map((claim: any) => (
                   <tr key={claim.id}>
-                    <td className="px-4 py-3 font-medium">{claim.listing.businessName}</td>
+                    <td className="px-4 py-3 font-medium">{claim.listing?.businessName ?? "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {claim.verificationMethod.replace("_", " ")}
                     </td>

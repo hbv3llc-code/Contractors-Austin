@@ -7,7 +7,7 @@ import type { Metadata } from "next";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 import { Button } from "@/components/ui/button";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface ProjectPageProps {
   params: { slug: string };
@@ -15,9 +15,14 @@ interface ProjectPageProps {
 
 async function getProject(slug: string) {
   try {
-    return await prisma.projectPost.findUnique({
-      where: { slug, isPublished: true },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("ProjectPost")
+      .select("id, slug, title, excerpt, content, imageUrl, city, serviceSlug, contractorId, metaTitle, metaDesc, createdAt, isPublished")
+      .eq("slug", slug)
+      .eq("isPublished", true)
+      .maybeSingle();
+    return data;
   } catch {
     return null;
   }
@@ -39,11 +44,12 @@ export async function generateMetadata({ params }: ProjectPageProps): Promise<Me
 
 export async function generateStaticParams() {
   try {
-    const projects = await prisma.projectPost.findMany({
-      where: { isPublished: true },
-      select: { slug: true },
-    });
-    return projects.map((p) => ({ slug: p.slug }));
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("ProjectPost")
+      .select("slug")
+      .eq("isPublished", true);
+    return (data ?? []).map((p: { slug: string }) => ({ slug: p.slug }));
   } catch {
     return [];
   }
@@ -53,15 +59,21 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
   const project = await getProject(params.slug);
   if (!project) notFound();
 
-  // Get related contractor if linked
-  const contractor = project.contractorId
-    ? await prisma.contractor.findUnique({
-        where: { id: project.contractorId },
-        select: { name: true, slug: true, city: true },
-      }).catch(() => null)
-    : null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let contractor: any = null;
+  if (project.contractorId) {
+    try {
+      const admin = createAdminClient();
+      const { data } = await admin
+        .from("Contractor")
+        .select("name, slug, city")
+        .eq("id", project.contractorId)
+        .maybeSingle();
+      contractor = data;
+    } catch {}
+  }
 
-  const contentParagraphs = project.content.split("\n").filter((line) => line.trim());
+  const contentParagraphs = project.content.split("\n").filter((line: string) => line.trim());
 
   return (
     <>
@@ -131,7 +143,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
               </header>
 
               <div className="prose prose-gray max-w-none">
-                {contentParagraphs.map((para, i) => {
+                {contentParagraphs.map((para: string, i: number) => {
                   if (para.startsWith("# ")) {
                     return <h1 key={i} className="text-2xl font-bold text-foreground mt-6 mb-3">{para.slice(2)}</h1>;
                   }
@@ -160,7 +172,7 @@ export default async function ProjectPage({ params }: ProjectPageProps) {
             {contractor ? (
               <Button asChild>
                 <Link href={`/contractor/${contractor.slug}`}>
-                  View {contractor.name}'s Profile →
+                  View {contractor.name}&apos;s Profile →
                 </Link>
               </Button>
             ) : (

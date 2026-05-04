@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim());
-
-const REQUIRED_COLS = ["businessName"] as const;
 
 function parseCSV(text: string): Record<string, string>[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim());
@@ -12,7 +10,6 @@ function parseCSV(text: string): Record<string, string>[] {
 
   const headers = lines[0].split(",").map((h) => h.replace(/^"|"$/g, "").trim());
   return lines.slice(1).map((line) => {
-    // Simple CSV parser (handles quoted fields with commas)
     const values: string[] = [];
     let current = "";
     let inQuotes = false;
@@ -56,15 +53,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "CSV is empty or malformed" }, { status: 400 });
     }
 
-    // Create import batch
-    const batch = await prisma.importBatch.create({
-      data: {
+    const admin = createAdminClient();
+
+    const { data: batch } = await admin
+      .from("ImportBatch")
+      .insert({
         filename: file.name,
         importedByAdmin: user.email ?? user.id,
         totalRows: rows.length,
         status: "processing",
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (!batch) {
+      return NextResponse.json({ error: "Failed to create import batch" }, { status: 500 });
+    }
 
     let successfulRows = 0;
     let skippedRows = 0;
@@ -79,36 +83,37 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        // Skip if Google Place ID already exists
         if (row.googlePlaceId) {
-          const existing = await prisma.importedListing.findFirst({
-            where: { googlePlaceId: row.googlePlaceId },
-          });
+          const { data: existing } = await admin
+            .from("ImportedListing")
+            .select("id")
+            .eq("googlePlaceId", row.googlePlaceId)
+            .maybeSingle();
           if (existing) {
             skippedRows++;
             continue;
           }
         }
 
-        await prisma.importedListing.create({
-          data: {
-            importBatchId: batch.id,
-            googlePlaceId: row.googlePlaceId || null,
-            businessName: row.businessName.trim(),
-            phone: row.phone || null,
-            email: row.email || null,
-            website: row.website || null,
-            address: row.address || null,
-            city: row.city || null,
-            state: row.state || "TX",
-            zip: row.zip || null,
-            lat: row.lat ? parseFloat(row.lat) : null,
-            lng: row.lng ? parseFloat(row.lng) : null,
-            categoriesRaw: row.categoriesRaw || null,
-            description: row.description || null,
-            status: "unclaimed",
-          },
+        const { error } = await admin.from("ImportedListing").insert({
+          importBatchId: batch.id,
+          googlePlaceId: row.googlePlaceId || null,
+          businessName: row.businessName.trim(),
+          phone: row.phone || null,
+          email: row.email || null,
+          website: row.website || null,
+          address: row.address || null,
+          city: row.city || null,
+          state: row.state || "TX",
+          zip: row.zip || null,
+          lat: row.lat ? parseFloat(row.lat) : null,
+          lng: row.lng ? parseFloat(row.lng) : null,
+          categoriesRaw: row.categoriesRaw || null,
+          description: row.description || null,
+          status: "unclaimed",
         });
+
+        if (error) throw new Error(error.message);
         successfulRows++;
       } catch (err) {
         errorRows++;
@@ -116,11 +121,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Update batch with results
-    await prisma.importBatch.update({
-      where: { id: batch.id },
-      data: { successfulRows, skippedRows, errorRows, status: "complete" },
-    });
+    await admin
+      .from("ImportBatch")
+      .update({ successfulRows, skippedRows, errorRows, status: "complete" })
+      .eq("id", batch.id);
 
     return NextResponse.json({
       success: true,

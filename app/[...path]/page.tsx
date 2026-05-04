@@ -8,7 +8,7 @@ import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
 import { ContractorCard } from "@/components/contractor/contractor-card";
 import { Button } from "@/components/ui/button";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface PathPageProps {
   params: { path: string[] };
@@ -21,41 +21,54 @@ const STATIC_ROUTES = new Set([
 ]);
 
 async function resolvePageType(slug: string) {
+  const admin = createAdminClient();
+
   // Check if it's a pure service page
-  const service = await prisma.service.findUnique({
-    where: { slug, isPublic: true, isActive: true },
-  }).catch(() => null);
+  let service = null;
+  try {
+    const { data } = await admin
+      .from("Service")
+      .select("id, name, slug, description, isPublic, isActive")
+      .eq("slug", slug)
+      .eq("isPublic", true)
+      .eq("isActive", true)
+      .maybeSingle();
+    service = data;
+  } catch {}
   if (service) return { type: "service" as const, service, location: null };
 
   // Check if it ends with -contractors (location page)
   if (slug.endsWith("-contractors")) {
     const locationSlug = slug.replace(/-contractors$/, "");
-    const location = await prisma.location.findUnique({
-      where: { slug: locationSlug, isActive: true },
-    }).catch(() => null);
+    let location = null;
+    try {
+      const { data } = await admin
+        .from("Location")
+        .select("id, name, slug, isActive")
+        .eq("slug", locationSlug)
+        .eq("isActive", true)
+        .maybeSingle();
+      location = data;
+    } catch {}
     if (location) return { type: "location" as const, service: null, location };
   }
 
-  // Check for service+location combo: try all public services
-  const services = await prisma.service.findMany({
-    where: { isPublic: true, isActive: true },
-    select: { slug: true, name: true, id: true, description: true },
-  }).catch(() => []);
+  // Check for service+location combo by fetching all and matching
+  let services: { id: string; name: string; slug: string; description: string | null }[] = [];
+  let locations: { id: string; name: string; slug: string }[] = [];
+  try {
+    const [{ data: svcs }, { data: locs }] = await Promise.all([
+      admin.from("Service").select("id, name, slug, description").eq("isPublic", true).eq("isActive", true),
+      admin.from("Location").select("id, name, slug").eq("isActive", true),
+    ]);
+    services = svcs ?? [];
+    locations = locs ?? [];
+  } catch {}
 
   for (const svc of services) {
-    // Try all locations for this service slug suffix
-    const locations = await prisma.location.findMany({
-      where: { isActive: true },
-      select: { slug: true, name: true, id: true },
-    }).catch(() => []);
-
     for (const loc of locations) {
       if (slug === `${loc.slug}-${svc.slug}`) {
-        const fullService = await prisma.service.findUnique({ where: { id: svc.id } });
-        const fullLocation = await prisma.location.findUnique({ where: { id: loc.id } });
-        if (fullService && fullLocation) {
-          return { type: "service_location" as const, service: fullService, location: fullLocation };
-        }
+        return { type: "service_location" as const, service: svc, location: loc };
       }
     }
   }
@@ -63,33 +76,49 @@ async function resolvePageType(slug: string) {
   return null;
 }
 
-async function getContractors(type: "service" | "location" | "service_location", serviceSlug?: string, locationSlug?: string) {
+async function getContractors(serviceSlug?: string, locationSlug?: string) {
+  const admin = createAdminClient();
   try {
-    return await prisma.contractor.findMany({
-      where: {
-        verifiedStatus: { not: "unclaimed" },
-        ...(serviceSlug && {
-          services: { some: { service: { slug: serviceSlug } } },
-        }),
-        ...(locationSlug && {
-          locations: { some: { location: { slug: locationSlug } } },
-        }),
-      },
-      include: {
-        services: {
-          include: { service: true },
-          where: { isPrimary: true },
-          take: 1,
-        },
-        membership: true,
-      },
-      orderBy: [
-        { membership: { planType: "desc" } },
-        { rating: "desc" },
-        { reviewCount: "desc" },
-      ],
-      take: 20,
-    });
+    let finalIds: string[] | null = null;
+
+    if (serviceSlug) {
+      const { data: svc } = await admin.from("Service").select("id").eq("slug", serviceSlug).maybeSingle();
+      if (!svc) return [];
+      const { data: cs } = await admin.from("ContractorService").select("contractorId").eq("serviceId", svc.id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      finalIds = (cs ?? []).map((c: any) => c.contractorId);
+    }
+
+    if (locationSlug) {
+      const { data: loc } = await admin.from("Location").select("id").eq("slug", locationSlug).maybeSingle();
+      if (!loc) return [];
+      const { data: cl } = await admin.from("ContractorLocation").select("contractorId").eq("locationId", loc.id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const locIds = new Set((cl ?? []).map((c: any) => c.contractorId));
+      finalIds = finalIds ? finalIds.filter((id) => locIds.has(id)) : [...locIds];
+    }
+
+    if (finalIds !== null && finalIds.length === 0) return [];
+
+    let query = admin
+      .from("Contractor")
+      .select("*, ContractorService(id, isPrimary, Service(id, name, slug)), Membership(planType, status)")
+      .neq("verifiedStatus", "unclaimed")
+      .order("rating", { ascending: false })
+      .limit(20);
+
+    if (finalIds !== null) {
+      query = query.in("id", finalIds);
+    }
+
+    const { data } = await query;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data ?? []).map((c: any) => ({
+      ...c,
+      services: (c.ContractorService ?? []).map((cs: any) => ({ ...cs, service: cs.Service })),
+      membership: Array.isArray(c.Membership) ? c.Membership[0] : c.Membership,
+    }));
   } catch {
     return [];
   }
@@ -122,22 +151,18 @@ export async function generateMetadata({ params }: PathPageProps): Promise<Metad
 
 export async function generateStaticParams() {
   try {
-    const [services, locations] = await Promise.all([
-      prisma.service.findMany({ where: { isPublic: true, isActive: true }, select: { slug: true } }),
-      prisma.location.findMany({ where: { isActive: true }, select: { slug: true } }),
+    const admin = createAdminClient();
+    const [{ data: services }, { data: locations }] = await Promise.all([
+      admin.from("Service").select("slug").eq("isPublic", true).eq("isActive", true),
+      admin.from("Location").select("slug").eq("isActive", true),
     ]);
 
     const paths: { path: string[] }[] = [];
 
-    // Service pages
-    services.forEach((s) => paths.push({ path: [s.slug] }));
-
-    // Location pages
-    locations.forEach((l) => paths.push({ path: [`${l.slug}-contractors`] }));
-
-    // Service × Location pages
-    services.forEach((s) => {
-      locations.forEach((l) => {
+    (services ?? []).forEach((s: { slug: string }) => paths.push({ path: [s.slug] }));
+    (locations ?? []).forEach((l: { slug: string }) => paths.push({ path: [`${l.slug}-contractors`] }));
+    (services ?? []).forEach((s: { slug: string }) => {
+      (locations ?? []).forEach((l: { slug: string }) => {
         paths.push({ path: [`${l.slug}-${s.slug}`] });
       });
     });
@@ -151,7 +176,6 @@ export async function generateStaticParams() {
 export default async function DynamicSeoPage({ params }: PathPageProps) {
   const slug = params.path.join("/");
 
-  // Block static routes from this catch-all
   const firstSegment = slug.split("/")[0];
   if (!firstSegment || STATIC_ROUTES.has(firstSegment)) {
     notFound();
@@ -162,11 +186,7 @@ export default async function DynamicSeoPage({ params }: PathPageProps) {
 
   const { type, service, location } = resolved;
 
-  const contractors = await getContractors(
-    type,
-    service?.slug,
-    location?.slug
-  );
+  const contractors = await getContractors(service?.slug, location?.slug);
 
   const locations = [
     { name: "Austin", slug: "austin" },
@@ -245,7 +265,6 @@ export default async function DynamicSeoPage({ params }: PathPageProps) {
           <div className="flex flex-col lg:flex-row gap-8">
             {/* Sidebar */}
             <aside className="lg:w-72 flex-shrink-0">
-              {/* Location links for service pages */}
               {(type === "service" || type === "service_location") && service && (
                 <div className="rounded-xl border border-border bg-white p-5 shadow-sm mb-4">
                   <h3 className="font-semibold text-foreground mb-3 text-sm">
@@ -316,7 +335,8 @@ export default async function DynamicSeoPage({ params }: PathPageProps) {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {contractors.map((contractor) => (
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {contractors.map((contractor: any) => (
                     <ContractorCard
                       key={contractor.id}
                       contractor={contractor as Parameters<typeof ContractorCard>[0]["contractor"]}

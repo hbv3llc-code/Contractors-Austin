@@ -3,24 +3,53 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Badge } from "@/components/ui/badge";
 import AdminMemberActions from "./member-actions";
 
 export const metadata: Metadata = { title: "Manage Member | Admin" };
 
 export default async function AdminMemberDetailPage({ params }: { params: { id: string } }) {
-  const contractor = await prisma.contractor.findUnique({
-    where: { id: params.id },
-    include: {
-      membership: true,
-      services: { include: { service: true } },
-      reviews: { orderBy: { createdAt: "desc" }, take: 10 },
-      leads: { orderBy: { createdAt: "desc" }, take: 10, include: { service: true } },
-      _count: { select: { leads: true, reviews: true } },
-    },
-  }).catch(() => null);
+  const admin = createAdminClient();
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let contractor: any = null;
+  try {
+    const { data } = await admin
+      .from("Contractor")
+      .select("*, Membership(planType, status), ContractorService(id, Service(id, name, slug))")
+      .eq("id", params.id)
+      .maybeSingle();
+    if (data) {
+      const membership = Array.isArray(data.Membership) ? data.Membership[0] : data.Membership;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const services = (data.ContractorService ?? []).map((cs: any) => ({
+        ...cs,
+        service: Array.isArray(cs.Service) ? cs.Service[0] : cs.Service,
+      }));
+
+      // Fetch lead and review counts + recent data
+      const [{ data: leads }, { count: leadCount }, { count: reviewCount }] = await Promise.all([
+        admin.from("Lead").select("id, name, status, createdAt, Service(name)").eq("contractorId", data.id).order("createdAt", { ascending: false }).limit(10),
+        admin.from("Lead").select("*", { count: "exact", head: true }).eq("contractorId", data.id),
+        admin.from("Review").select("*", { count: "exact", head: true }).eq("contractorId", data.id),
+      ]);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const normalizedLeads = (leads ?? []).map((l: any) => ({
+        ...l,
+        service: Array.isArray(l.Service) ? l.Service[0] : l.Service,
+      }));
+
+      contractor = {
+        ...data,
+        membership,
+        services,
+        leads: normalizedLeads,
+        _count: { leads: leadCount ?? 0, reviews: reviewCount ?? 0 },
+      };
+    }
+  } catch {}
 
   if (!contractor) notFound();
 
@@ -93,9 +122,10 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Services</p>
               <div className="flex flex-wrap gap-1.5">
-                {contractor.services.map((cs) => (
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                {contractor.services.map((cs: any) => (
                   <span key={cs.id} className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-700">
-                    {cs.service.name}
+                    {cs.service?.name ?? "—"}
                   </span>
                 ))}
               </div>
@@ -119,7 +149,8 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
             <h2 className="font-bold text-foreground">Recent Leads</h2>
           </div>
           <div className="divide-y divide-border">
-            {contractor.leads.map((lead) => (
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {contractor.leads.map((lead: any) => (
               <div key={lead.id} className="px-6 py-3 flex justify-between text-sm">
                 <div>
                   <span className="font-medium">{lead.name}</span>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { z } from "zod";
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim());
@@ -21,24 +21,35 @@ export async function POST(
 
   try {
     const { action } = schema.parse(await request.json());
+    const admin = createAdminClient();
 
-    const review = await prisma.review.update({
-      where: { id: params.id },
-      data: { status: action === "approve" ? "approved" : "rejected" },
-      include: { contractor: true },
-    });
+    const { data: review } = await admin
+      .from("Review")
+      .update({ status: action === "approve" ? "approved" : "rejected" })
+      .eq("id", params.id)
+      .select("id, contractorId, rating")
+      .single();
 
-    // Update contractor rating if approved
+    if (!review) {
+      return NextResponse.json({ error: "Review not found" }, { status: 404 });
+    }
+
     if (action === "approve") {
-      const reviews = await prisma.review.findMany({
-        where: { contractorId: review.contractorId, status: "approved" },
-        select: { rating: true },
-      });
-      const avg = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
-      await prisma.contractor.update({
-        where: { id: review.contractorId },
-        data: { rating: avg, reviewCount: reviews.length },
-      });
+      const { data: reviews } = await admin
+        .from("Review")
+        .select("rating")
+        .eq("contractorId", review.contractorId)
+        .eq("status", "approved");
+
+      const reviewList = reviews ?? [];
+      const avg = reviewList.length > 0
+        ? reviewList.reduce((sum: number, r: { rating: number }) => sum + r.rating, 0) / reviewList.length
+        : 0;
+
+      await admin
+        .from("Contractor")
+        .update({ rating: avg, reviewCount: reviewList.length })
+        .eq("id", review.contractorId);
     }
 
     return NextResponse.json({ success: true, data: review });

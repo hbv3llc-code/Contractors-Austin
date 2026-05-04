@@ -5,7 +5,7 @@ import { Hammer, MapPin, Clock } from "lucide-react";
 import type { Metadata } from "next";
 import Header from "@/components/layout/header";
 import Footer from "@/components/layout/footer";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const metadata: Metadata = {
   title: "Real Project Showcases | Austin Contractor Work",
@@ -14,20 +14,13 @@ export const metadata: Metadata = {
 
 async function getProjects() {
   try {
-    return await prisma.projectPost.findMany({
-      where: { isPublished: true },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        slug: true,
-        title: true,
-        excerpt: true,
-        imageUrl: true,
-        city: true,
-        serviceSlug: true,
-        createdAt: true,
-      },
-    });
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("ProjectPost")
+      .select("id, slug, title, excerpt, imageUrl, city, serviceSlug, createdAt")
+      .eq("isPublished", true)
+      .order("createdAt", { ascending: false });
+    return data ?? [];
   } catch {
     return [];
   }
@@ -68,7 +61,8 @@ export default async function ProjectsPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {projects.map((project) => (
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {projects.map((project: any) => (
                 <Link key={project.id} href={`/projects/${project.slug}`} className="group block">
                   <article className="rounded-xl border border-border bg-white shadow-sm hover:shadow-md hover:border-primary/30 transition-all overflow-hidden h-full flex flex-col">
                     {project.imageUrl ? (

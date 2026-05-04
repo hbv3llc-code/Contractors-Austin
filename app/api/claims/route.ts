@@ -5,14 +5,14 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { sendClaimVerifyEmail } from "@/lib/email";
 import { z } from "zod";
 
 const schema = z.object({
   listingId: z.string().uuid(),
   method: z.enum(["email_domain", "phone_sms"]),
-  contactValue: z.string().min(3), // email address or phone number
+  contactValue: z.string().min(3),
 });
 
 function generateCode() {
@@ -30,7 +30,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { listingId, method, contactValue } = schema.parse(body);
 
-    const listing = await prisma.importedListing.findUnique({ where: { id: listingId } });
+    const admin = createAdminClient();
+
+    const { data: listing } = await admin
+      .from("ImportedListing")
+      .select("id, businessName, status")
+      .eq("id", listingId)
+      .maybeSingle();
+
     if (!listing) {
       return NextResponse.json({ error: "Listing not found" }, { status: 404 });
     }
@@ -39,29 +46,31 @@ export async function POST(request: NextRequest) {
     }
 
     // Delete any existing pending claim for this listing
-    await prisma.claimRequest.deleteMany({
-      where: { listingId, status: "pending" },
-    });
+    await admin
+      .from("ClaimRequest")
+      .delete()
+      .eq("listingId", listingId)
+      .eq("status", "pending");
 
     const code = generateCode();
 
-    const claim = await prisma.claimRequest.create({
-      data: {
+    const { data: claim } = await admin
+      .from("ClaimRequest")
+      .insert({
         listingId,
         memberId: user.id,
         verificationMethod: method === "email_domain" ? "email_domain" : "phone_sms",
         verificationCode: code,
         status: "pending",
-      },
-    });
+      })
+      .select()
+      .single();
 
-    // Send verification
     if (method === "email_domain") {
       await sendClaimVerifyEmail(contactValue, listing.businessName, code).catch((err) =>
         console.error("Failed to send claim verify email:", err)
       );
     } else {
-      // SMS via Twilio
       try {
         const twilio = (await import("twilio")).default;
         const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
@@ -79,7 +88,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, data: { claimId: claim.id } }, { status: 201 });
+    return NextResponse.json({ success: true, data: { claimId: claim?.id } }, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Invalid request", details: error.errors }, { status: 400 });

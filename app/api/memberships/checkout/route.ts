@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
@@ -36,10 +36,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Price not configured" }, { status: 400 });
     }
 
-    const contractor = await prisma.contractor.findFirst({
-      where: { OR: [{ userId: user.id }, { email: user.email! }] },
-      include: { membership: true },
-    });
+    const admin = createAdminClient();
+    const { data: contractor } = await admin
+      .from("Contractor")
+      .select("id")
+      .or(`userId.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
 
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 

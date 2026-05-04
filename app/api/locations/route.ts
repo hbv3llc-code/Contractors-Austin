@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function GET() {
   try {
-    const locations = await prisma.location.findMany({
-      where: { isActive: true },
-      orderBy: { name: "asc" },
-    });
-    return NextResponse.json({ success: true, data: locations });
+    const admin = createAdminClient();
+    const { data: locations } = await admin
+      .from("Location")
+      .select("id, name, slug, isActive")
+      .eq("isActive", true)
+      .order("name", { ascending: true });
+    return NextResponse.json({ success: true, data: locations ?? [] });
   } catch (error) {
     console.error("GET /api/locations error:", error);
     return NextResponse.json(
